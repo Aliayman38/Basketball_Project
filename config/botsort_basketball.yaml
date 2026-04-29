@@ -1,0 +1,25 @@
+# BoT-SORT configuration tuned for basketball
+# ──────────────────────────────────────────────
+# Why BoT-SORT over ByteTrack for this problem:
+#   ByteTrack uses IoU-only matching. When a player jumps, their bounding box
+#   moves far from the Kalman prediction → IoU drops → ID switch.
+#   BoT-SORT adds ReID appearance embeddings so the jersey colour/texture
+#   re-matches the same player after the jump, even if the IoU is low.
+#
+# Reference: https://arxiv.org/abs/2206.14651
+
+tracker_type: botsort
+
+# Detection thresholds
+track_high_thresh: 0.25    # ← lowered from 0.50 default; catches low-conf jumpers
+track_low_thresh:  0.10    # secondary pass threshold
+new_track_thresh:  0.25    # minimum conf to start a new track
+
+# Temporal settings
+track_buffer:    60         # ← doubled from 30; keeps ID alive for full jump arc
+match_thresh:    0.80       # IoU + ReID blended match score threshold
+proximity_thresh: 0.5       # max cosine distance for ReID match
+appearance_thresh: 0.25     # min ReID similarity to re-associate
+
+# Kalman filter — no changes needed, BoT-SORT tunes this internally
+with_reid: true             # enable appearance embedding matching

@@ -52,7 +52,7 @@ CLASS_ID_TO_NAME: dict[int, str] = {
 CLASS_NAME_TO_ID: dict[str, int] = {v: k for k, v in CLASS_ID_TO_NAME.items()}
 
 # Classes we actually care about at inference time
-CLASSES_OF_INTEREST = {CLASS_BALL, CLASS_PLAYER, CLASS_REF}
+CLASSES_OF_INTEREST = {CLASS_BALL, CLASS_PLAYER, CLASS_REF, CLASS_HOOP, CLASS_OVERLAY}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

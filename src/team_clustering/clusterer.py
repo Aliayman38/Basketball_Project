@@ -1,7 +1,8 @@
 """
 src/team_clustering/clusterer.py
 ─────────────────────────────────
-Unsupervised team assignment via jersey-colour clustering.
+Advanced Unsupervised team assignment via Foundation Models.
+Utilizes: SigLIP (Vision Encoder) + UMAP (Dim Reduction) + K-Means (Clustering).
 
 Dataset class map  (Roboflow basketball-players v11)
 ─────────────────────────────────────────────────────
@@ -12,71 +13,42 @@ Dataset class map  (Roboflow basketball-players v11)
   4 → Player   ← clustered here
   5 → Ref      ← detected separately; auto-assigned to TEAM_REF
 
-Design decision
-────────────────
-Referees are their own YOLO class (id=5), so they are never fed into
-KMeans.  Only CLASS_PLAYER detections enter the colour pipeline.
-We therefore need k=2 (Team A vs Team B) — not k=3.
-Ref tracks receive the fixed label TEAM_REF=2 automatically.
-
-Algorithm
-──────────
-1.  Each frame: for every detection with class_id == CLASS_PLAYER(4),
-    crop the bbox, take the torso strip (12 %–52 % of box height:
-    jersey region — avoids face and shorts).
-2.  Convert torso to HSV.  Discard low-saturation and very-dark pixels
-    (white court floor, shadows, specular highlights).
-3.  Buffer the per-player median-HSV vector per frame.
-4.  After warm_up_frames frames: fit KMeans(k=2) on the per-player
-    median-colour representations.
-5.  Predict label for every new track that appears after the fit.
-6.  Optional refine() re-fits on all data (call at end-of-video).
-
-Why HSV over RGB?
-  Hue is invariant to brightness/exposure changes.  RGB clusters shift
-  drastically under different arena lighting sections; HSV stays stable.
-
-Importable names
-─────────────────
-  TeamClusterer                 — main class
-  CLASS_PLAYER, CLASS_REF       — int  (4, 5)
-  TEAM_A, TEAM_B, TEAM_REF      — int  (0, 1, 2)
-  TEAM_UNKNOWN                  — int  (-1)
-  TEAM_COLORS                   — dict[int, tuple[int,int,int]]  BGR
-  TEAM_NAMES                    — dict[int, str]
-
-Usage in detector.py
-─────────────────────
-  from src.team_clustering.clusterer import (
-      TeamClusterer,
-      CLASS_PLAYER, CLASS_REF,
-      TEAM_A, TEAM_B, TEAM_REF, TEAM_UNKNOWN,
-      TEAM_COLORS, TEAM_NAMES,
-  )
+Pipeline Architecture
+───────────────────
+1. Crop player torso to isolate the jersey.
+2. Pass the crop through Google's SigLIP vision model to extract a 
+   semantic embedding vector (robust to shadows, lighting, and occlusion).
+3. Buffer these high-dimensional embeddings per track_id.
+4. After warm_up_frames, apply UMAP to reduce the embeddings to 2D space.
+5. Apply K-Means(k=2) on the 2D UMAP projections to assign Team A and Team B.
+6. For new tracks appearing after warm-up, transform via UMAP and predict via K-Means.
 """
 
 from __future__ import annotations
 
 import cv2
+import torch
 import numpy as np
 from collections import defaultdict
+from PIL import Image
+
+import umap.umap_ as umap
 from sklearn.cluster import KMeans
-from sklearn.mixture import GaussianMixture
+from transformers import SiglipImageProcessor, SiglipVisionModel
 
-
-# ── Dataset class IDs  (must match data/basketball.yaml `names`) ──────────────
+# ── Dataset class IDs ─────────────────────────────────────────────────────────
 CLASS_BALL    = 0
 CLASS_CLOCK   = 1
 CLASS_HOOP    = 2
 CLASS_OVERLAY = 3
-CLASS_PLAYER  = 4   # ← players to cluster
-CLASS_REF     = 5   # ← referees detected separately
+CLASS_PLAYER  = 4   
+CLASS_REF     = 5   
 
 # ── Team label constants ──────────────────────────────────────────────────────
-TEAM_A       = 0   # KMeans cluster 0
-TEAM_B       = 1   # KMeans cluster 1
-TEAM_REF     = 2   # Always assigned to CLASS_REF detections
-TEAM_UNKNOWN = -1  # Not yet assigned
+TEAM_A       = 0   
+TEAM_B       = 1   
+TEAM_REF     = 2   
+TEAM_UNKNOWN = -1  
 
 # ── Display colours per team  (BGR for OpenCV) ────────────────────────────────
 TEAM_COLORS: dict[int, tuple[int, int, int]] = {
@@ -94,226 +66,176 @@ TEAM_NAMES: dict[int, str] = {
     TEAM_UNKNOWN: "Unknown",
 }
 
-# ── Default torso slice  (fraction of bounding-box height) ───────────────────
-_TORSO_TOP  = 0.12   # skip face / head
-_TORSO_BOT  = 0.52   # stop before shorts / legs
+# ── Default torso slice ───────────────────────────────────────────────────────
+_TORSO_TOP  = 0.15   # skip head and neck
+_TORSO_BOT  = 0.50   # stop before shorts
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 class TeamClusterer:
     """
-    Assigns basketball player tracks to teams via jersey-colour clustering.
-
-    Parameters
-    ----------
-    warm_up_frames : int
-        Frames to collect before the first KMeans fit.  60 frames ≈ 2 s at
-        30 fps — enough for stable per-player colour estimates.
-    torso_ratio : tuple[float, float]
-        (top_frac, bottom_frac) vertical crop window inside the bbox.
-    method : {'kmeans', 'gmm'}
-        Clustering backend.  GMM handles dark-blue vs black jerseys better.
-    min_color_obs : int
-        Minimum per-player frame observations before including in KMeans fit.
+    Assigns basketball player tracks to teams using SigLIP + UMAP + KMeans.
     """
 
     def __init__(
         self,
-        warm_up_frames: int               = 60,
-        torso_ratio:    tuple[float, float] = (_TORSO_TOP, _TORSO_BOT),
-        method:         str               = "kmeans",
-        min_color_obs:  int               = 5,
+        warm_up_frames: int = 60,
+        torso_ratio: tuple[float, float] = (_TORSO_TOP, _TORSO_BOT),
+        min_obs: int = 5,
+        device: str | None = None
     ) -> None:
         self.warm_up_frames = warm_up_frames
-        self.torso_ratio    = torso_ratio
-        self.method         = method
-        self.min_color_obs  = min_color_obs
+        self.torso_ratio = torso_ratio
+        self.min_obs = min_obs
 
-        # {track_id: [median_hsv_vec, ...]}  — raw per-frame observations
-        self._color_buffer: dict[int, list[np.ndarray]] = defaultdict(list)
+        # Set device dynamically
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            self.device = torch.device(device)
 
-        # {track_id: team_id}  — final assignments
-        self._team_labels:  dict[int, int] = {}
+        print(f"[TeamClusterer] Initializing SigLIP on {self.device}...")
+        
+        # Load SigLIP Model and Processor
+        model_id = "google/siglip-base-patch16-224"
+        self.processor = SiglipImageProcessor.from_pretrained(model_id)
+        self.siglip_model = SiglipVisionModel.from_pretrained(model_id).to(self.device)
+        self.siglip_model.eval()
 
-        # Fitted sklearn model (KMeans or GMM)
-        self._model: KMeans | GaussianMixture | None = None
+        # {track_id: [embedding_vector, ...]}
+        self._embed_buffer: dict[int, list[np.ndarray]] = defaultdict(list)
+        
+        # {track_id: team_id}
+        self._team_labels: dict[int, int] = {}
 
-        self.is_fitted:  bool = False
-        self._frame_idx: int  = 0
+        # Dimensionality Reduction & Clustering Models
+        self.umap_reducer = umap.UMAP(n_components=2, random_state=42)
+        self.kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+
+        self.is_fitted: bool = False
+        self._frame_idx: int = 0
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def update(self, frame: np.ndarray, tracked_dets: list[dict]) -> None:
         """
-        Call once per frame with the current BGR frame and all tracked dets.
-
-        Each detection dict must have:
-            track_id  : int
-            bbox      : np.ndarray  [x1, y1, x2, y2]
-            class_id  : int
-
-        Behaviour:
-          • CLASS_REF     → immediately labelled TEAM_REF, never clustered.
-          • CLASS_PLAYER  → colour buffered; clustered after warm-up.
-          • All others    → ignored.
+        Extracts embeddings for each player in the frame and manages clustering.
         """
         for det in tracked_dets:
             cid = int(det["class_id"])
-            tid = int(det["track_id"])
+            tid = int(det.get("track_id", -1))
+
+            if tid == -1:
+                continue
 
             if cid == CLASS_REF:
-                # Referees: fixed label, no colour processing needed
                 self._team_labels[tid] = TEAM_REF
                 continue
 
             if cid != CLASS_PLAYER:
                 continue
 
-            colour = self._extract_jersey_hsv(frame, det["bbox"])
-            if colour is not None:
-                self._color_buffer[tid].append(colour)
+            embedding = self._extract_embedding(frame, det["bbox"])
+            if embedding is not None:
+                self._embed_buffer[tid].append(embedding)
 
         self._frame_idx += 1
 
-        # First-time fit at warm-up boundary
         if self._frame_idx == self.warm_up_frames and not self.is_fitted:
             self._fit()
 
-        # Assign any player whose buffer just crossed min_color_obs
         if self.is_fitted:
             self._assign_pending()
 
     def get_team(self, track_id: int) -> int:
-        """Return TEAM_A(0), TEAM_B(1), TEAM_REF(2), or TEAM_UNKNOWN(-1)."""
         return self._team_labels.get(track_id, TEAM_UNKNOWN)
 
     def get_team_name(self, track_id: int) -> str:
-        """Human-readable team label string."""
         return TEAM_NAMES[self.get_team(track_id)]
 
     def get_color(self, track_id: int) -> tuple[int, int, int]:
-        """BGR tuple for drawing bounding boxes / overlay text."""
         return TEAM_COLORS[self.get_team(track_id)]
 
     def get_team_rosters(self) -> dict[int, list[int]]:
-        """
-        {team_id: [track_id, ...]} for every team.
-
-        Used by the analytics engine to aggregate per-team statistics
-        (total distance, avg speed, etc.).
-        """
         rosters: dict[int, list[int]] = {TEAM_A: [], TEAM_B: [], TEAM_REF: []}
         for tid, team in self._team_labels.items():
             rosters.setdefault(team, []).append(tid)
         return rosters
 
     def refine(self) -> None:
-        """
-        Re-fit the model on ALL buffered data collected so far.
-
-        Recommended usage: call once after the video loop completes to
-        produce the cleanest team assignments for the final analytics report.
-        """
         self._fit(label="REFINE")
 
-    def print_roster(self) -> None:
-        """Pretty-print the team rosters to stdout."""
-        rosters = self.get_team_rosters()
-        print("\n" + "─" * 48)
-        print("  TEAM ROSTERS")
-        print("─" * 48)
-        for team_id in (TEAM_A, TEAM_B, TEAM_REF):
-            tids = sorted(rosters.get(team_id, []))
-            name = TEAM_NAMES[team_id]
-            print(f"  {name:<10s}  ({len(tids):2d} tracks)  IDs: {tids}")
-        print("─" * 48 + "\n")
+    # ── Private Helpers ───────────────────────────────────────────────────────
 
-    # ── Private helpers ───────────────────────────────────────────────────────
-
-    def _extract_jersey_hsv(
-        self,
-        frame: np.ndarray,
-        bbox:  np.ndarray,
-    ) -> np.ndarray | None:
+    def _extract_embedding(self, frame: np.ndarray, bbox: np.ndarray) -> np.ndarray | None:
         """
-        Crop the torso region and return its median HSV as a (3,) array.
-
-        Steps
-        ─────
-        1. Clamp bbox to frame bounds.
-        2. Slice vertically by torso_ratio.
-        3. Convert to HSV.
-        4. Discard unsaturated (S ≤ 40) and very-dark (V ≤ 30) pixels.
-        5. Return median of remaining pixels; fall back to all-pixel median
-           if fewer than 10 saturated pixels remain (handles dark jerseys).
+        Crop the player's torso, pass it through SigLIP, and return the embedding.
         """
         x1 = max(0, int(bbox[0]));  y1 = max(0, int(bbox[1]))
         x2 = min(frame.shape[1] - 1, int(bbox[2]))
         y2 = min(frame.shape[0] - 1, int(bbox[3]))
 
-        if (x2 - x1) < 8 or (y2 - y1) < 16:
-            return None   # bbox too small — skip
+        if (x2 - x1) < 16 or (y2 - y1) < 32:
+            return None
 
-        crop   = frame[y1:y2, x1:x2]
-        h_box  = crop.shape[0]
-        t_top  = int(h_box * self.torso_ratio[0])
-        t_bot  = int(h_box * self.torso_ratio[1])
-        torso  = crop[t_top:t_bot, :]
+        crop = frame[y1:y2, x1:x2]
+        h_box = crop.shape[0]
+        
+        t_top = int(h_box * self.torso_ratio[0])
+        t_bot = int(h_box * self.torso_ratio[1])
+        torso = crop[t_top:t_bot, :]
 
         if torso.size == 0:
             return None
 
-        hsv    = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
-        pixels = hsv.reshape(-1, 3).astype(np.float32)
+        # Convert BGR (OpenCV) to RGB (PIL) for SigLIP
+        torso_rgb = cv2.cvtColor(torso, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(torso_rgb)
 
-        # Saturation > 40  AND  Value > 30  → colourful, non-shadow pixels
-        mask   = (pixels[:, 1] > 40) & (pixels[:, 2] > 30)
-        valid  = pixels[mask]
+        inputs = self.processor(images=pil_img, return_tensors="pt").to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.siglip_model(**inputs)
+            # Use pooler_output (usually a 768-dim vector representing the image)
+            embedding = outputs.pooler_output.squeeze().cpu().numpy()
 
-        return np.median(valid if len(valid) >= 10 else pixels, axis=0)
+        return embedding
 
     def _build_feature_matrix(self) -> tuple[np.ndarray, list[int]]:
         """
-        Aggregate per-player colour buffers → (N, 3) feature matrix.
-
-        Only players with ≥ min_color_obs observations are included.
-        Each player is represented by the median of their observation
-        vectors (robust to per-frame noise).
+        Aggregate per-player embedding buffers into an (N, 768) feature matrix.
         """
         feats: list[np.ndarray] = []
-        tids:  list[int]        = []
+        tids: list[int] = []
 
-        for tid, obs in self._color_buffer.items():
-            if len(obs) >= self.min_color_obs:
-                feats.append(np.median(obs, axis=0))
+        for tid, obs in self._embed_buffer.items():
+            if len(obs) >= self.min_obs:
+                # Use the mean embedding for robust representation
+                feats.append(np.mean(obs, axis=0))
                 tids.append(tid)
 
         if not feats:
-            return np.empty((0, 3), dtype=np.float32), []
+            return np.empty((0, 768), dtype=np.float32), []
 
         return np.array(feats, dtype=np.float32), tids
 
     def _fit(self, label: str = "FIT") -> None:
-        """Fit the clustering model and assign labels to all buffered players."""
+        """
+        Apply UMAP for dimensionality reduction, then KMeans for clustering.
+        """
         X, tids = self._build_feature_matrix()
 
         if len(X) < 2:
-            print(
-                f"[TeamClusterer] {label} — need ≥ 2 players with sufficient "
-                f"observations, got {len(X)}.  Waiting for more frames…"
-            )
+            print(f"[TeamClusterer] {label} — Not enough valid players ({len(X)}). Waiting...")
             return
 
-        if self.method == "gmm":
-            self._model = GaussianMixture(
-                n_components=2, random_state=42, n_init=5, covariance_type="full"
-            )
-            labels = self._model.fit_predict(X)
-        else:
-            self._model = KMeans(
-                n_clusters=2, random_state=42, n_init=10
-            )
-            labels = self._model.fit_predict(X)
+        print(f"[TeamClusterer] {label} — Reducing {len(X)} embeddings via UMAP...")
+        
+        # 1. Dimensionality Reduction
+        X_reduced = self.umap_reducer.fit_transform(X)
+
+        # 2. Clustering
+        labels = self.kmeans.fit_predict(X_reduced)
 
         for tid, lab in zip(tids, labels):
             self._team_labels[tid] = int(lab)
@@ -321,32 +243,31 @@ class TeamClusterer:
         self.is_fitted = True
         n_a = int((labels == 0).sum())
         n_b = int((labels == 1).sum())
-        print(
-            f"[TeamClusterer] {label} — {len(X)} players clustered.  "
-            f"Team A: {n_a}  Team B: {n_b}"
-        )
+        
+        print(f"[TeamClusterer] {label} Complete. Team A: {n_a} | Team B: {n_b}")
 
     def _assign_pending(self) -> None:
         """
-        Predict team label for any player track whose buffer recently crossed
-        min_color_obs but hasn't been assigned yet (appeared after warm-up).
+        Assign team labels to new tracks using the fitted UMAP and KMeans models.
         """
-        for tid, obs in self._color_buffer.items():
+        for tid, obs in self._embed_buffer.items():
             if tid in self._team_labels:
                 continue
-            if len(obs) < self.min_color_obs:
+            if len(obs) < self.min_obs:
                 continue
-            feat  = np.median(obs, axis=0).reshape(1, -1).astype(np.float32)
-            label = int(self._model.predict(feat)[0])
+            
+            feat = np.mean(obs, axis=0).reshape(1, -1).astype(np.float32)
+            
+            # Map high-dimensional embedding to 2D space using fitted UMAP
+            feat_reduced = self.umap_reducer.transform(feat)
+            
+            # Predict team label using fitted KMeans
+            label = int(self.kmeans.predict(feat_reduced)[0])
             self._team_labels[tid] = label
-
-    # ── Dunder ────────────────────────────────────────────────────────────────
 
     def __repr__(self) -> str:
         return (
-            f"TeamClusterer("
-            f"method={self.method!r}, "
-            f"fitted={self.is_fitted}, "
-            f"assigned={len(self._team_labels)}, "
-            f"warm_up={self.warm_up_frames})"
+            f"TeamClusterer(Fitted={self.is_fitted}, "
+            f"Assigned={len(self._team_labels)}, "
+            f"Device={self.device})"
         )

@@ -223,6 +223,90 @@ class TrajectoryInterpolator:
         return vy < -JUMP_VERTICAL_PX
 
     # ── Reporting ─────────────────────────────────────────────────────────────
+    def stitch_out_of_bounds(
+        self, 
+        trajectories: dict[int, list[tuple]], 
+        frame_width: int, 
+        edge_margin: int = 80
+    ) -> dict[int, list[tuple]]:
+        """
+        Post-processing: If an ID dies near the edge of the screen, and a NEW ID 
+        spawns near that same edge later, merge them into a single continuous ID.
+        """
+        stitched = dict(trajectories)
+        
+        # 1. Gather the first and last known positions for every track
+        track_info = {}
+        for tid, traj in stitched.items():
+            if len(traj) < 2: 
+                continue
+            sorted_traj = sorted(traj, key=lambda p: p[2])
+            start_pt, end_pt = sorted_traj[0], sorted_traj[-1]
+            track_info[tid] = {
+                'start_f': start_pt[2], 'start_x': start_pt[0],
+                'end_f': end_pt[2],   'end_x': end_pt[0]
+            }
+            
+        exits = []   
+        entries = [] 
+        
+        # 2. Classify tracks as Edge Exits or Edge Entries
+        for tid, info in track_info.items():
+            if info['end_x'] < edge_margin:
+                exits.append({'tid': tid, 'frame': info['end_f'], 'edge': 'left'})
+            elif info['end_x'] > frame_width - edge_margin:
+                exits.append({'tid': tid, 'frame': info['end_f'], 'edge': 'right'})
+                
+            if info['start_f'] > 10: 
+                if info['start_x'] < edge_margin:
+                    entries.append({'tid': tid, 'frame': info['start_f'], 'edge': 'left'})
+                elif info['start_x'] > frame_width - edge_margin:
+                    entries.append({'tid': tid, 'frame': info['start_f'], 'edge': 'right'})
+        
+        exits.sort(key=lambda x: x['frame'])
+        used_entries = set()
+        
+        # --- FIX 1: Handle Chained Merges (Player A -> B -> C) ---
+        alias_map = {}
+        def get_root(t):
+            while t in alias_map:
+                t = alias_map[t]
+            return t
+        
+        # 3. Match Exits to Entries
+        for exit_data in exits:
+            original_exit_tid = exit_data['tid']
+            root_exit_tid = get_root(original_exit_tid)
+            
+            # --- FIX 2: Stop players merging with hoops/referees ---
+            # Player IDs are < 10000. Referees are 10000+. Hoops are 20000+.
+            # Integer division by 10000 groups them into matching "buckets".
+            namespace_bucket = root_exit_tid // 10000
+            
+            candidates = [
+                e for e in entries 
+                if e['edge'] == exit_data['edge'] 
+                and e['frame'] > exit_data['frame']
+                and e['tid'] not in used_entries
+                and (e['tid'] // 10000) == namespace_bucket  # Must be the same object type!
+            ]
+            
+            if not candidates:
+                continue
+                
+            candidates.sort(key=lambda x: x['frame'])
+            best_match = candidates[0]
+            entry_tid = best_match['tid']
+            
+            print(f"[Interpolator] Edge Stitch: Merging Track #{entry_tid} back into Root Track #{root_exit_tid} ({exit_data['edge']} edge)")
+            stitched[root_exit_tid].extend(stitched[entry_tid])
+            
+            del stitched[entry_tid]
+            used_entries.add(entry_tid)
+            alias_map[entry_tid] = root_exit_tid # Remember this merge for chains
+            
+        return stitched
+
 
     def get_gap_report(
         self, trajectories: dict[int, list[tuple]]

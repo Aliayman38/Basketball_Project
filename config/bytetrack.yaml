@@ -1,0 +1,13 @@
+# config/botsort.yaml
+# BoT-SORT tracker — uses appearance ReID features to re-identify players
+# after they leave and re-enter the frame. Much more stable than ByteTrack
+# for basketball where players frequently exit the camera view.
+
+tracker_type: bytetrack
+
+track_high_thresh: 0.25
+track_low_thresh: 0.10
+new_track_thresh: 0.25
+track_buffer: 90
+match_thresh: 0.65
+fuse_score: True

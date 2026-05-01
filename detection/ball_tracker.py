@@ -126,7 +126,7 @@ class BallTracker:
 
         # ── Strategy 3: Lucas-Kanade optical flow ────────────────────────
         if pos is None and self.use_flow and self._prev_gray is not None:
-            flow_pos = self._optical_flow(gray)
+            flow_pos = self._optical_flow(gray, frame)
             if flow_pos and self._kalman_gate(flow_pos):
                 pos, source = flow_pos, "flow"
                 self._flow_miss_count = 0
@@ -247,7 +247,7 @@ class BallTracker:
 # ── Strategy 3: Lucas-Kanade optical flow ────────────────────────────────
 
     def _optical_flow(
-        self, gray: np.ndarray, frame: np.ndarray
+    self, gray: np.ndarray, frame: np.ndarray
     ) -> tuple[float, float] | None:
         if self._flow_point is None or self._prev_gray is None:
             return None
@@ -285,7 +285,7 @@ class BallTracker:
         
         # If less than 5% of the patch is orange, reject the tracking point
         orange_ratio = cv2.countNonZero(orange_mask) / (patch.shape[0] * patch.shape[1])
-        if orange_ratio < 0.03:
+        if orange_ratio < 0.05:
             return None  # Tracker drifted onto something non-orange (e.g., a player)
 
         self._flow_point = np.array([[[cx, cy]]], dtype=np.float32)
@@ -349,14 +349,14 @@ class BallTracker:
 
         self.kf.predict()
         corrected = self.kf.correct(measurement)
-        return (float(corrected[0]), float(corrected[1]))
+        return (float(corrected[0][0]), float(corrected[1][0]))
 
     def _kalman_predict_only(self) -> tuple[float, float] | None:
         """Predict next position without a measurement (pure physics)."""
         if not self._kf_initialized:
             return None
         predicted = self.kf.predict()
-        cx, cy = float(predicted[0]), float(predicted[1])
+        cx, cy = float(predicted[0][0]), float(predicted[1][0])
 
         # Sanity: if prediction wanders off-screen or explodes, return None
         if not (0 <= cx < 4000 and 0 <= cy < 4000):

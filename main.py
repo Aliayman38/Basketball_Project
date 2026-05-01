@@ -5,10 +5,27 @@ Basketball analytics pipeline — SAM2 chunked tracking.
 
 Usage
 ─────
+  # Basic (no homography calibration):
   python main.py --video data/game.mp4 --output runs/detect/out.mp4
 
-  # If laptop still crashes, reduce chunk size (default 60):
+  # Full analytics (heatmaps + real-world distances/speeds):
+  python main.py --video data/game.mp4 \\
+                 --homography config/homography.npz \\
+                 --meters-per-pixel 0.0264
+
+  # Reduce chunk size if laptop crashes:
   python main.py --video data/game.mp4 --chunk-size 30
+
+Analytics outputs (always generated)
+──────────────────────────────────────
+  runs/detect/distance_report.csv   — total distance per player
+  runs/detect/speed_report.csv      — avg / max speed per player
+
+Additional outputs (require --homography)
+──────────────────────────────────────────
+  runs/detect/heatmap_team_a.png
+  runs/detect/heatmap_team_b.png
+  Mini-court overlay drawn live in the bottom-left of each video frame.
 """
 
 from __future__ import annotations
@@ -27,10 +44,23 @@ import torch
 from detection.ball_tracker import BallTracker
 from detection.detector import BasketballDetector
 from team_clustering.clusterer import (
-    TeamClusterer, CLASS_PLAYER, CLASS_REF,
+    TeamClusterer, CLASS_PLAYER, CLASS_REF, TEAM_A, TEAM_B, TEAM_COLORS,
 )
 from tracking.interpolator import TrajectoryInterpolator
 from tracking.sam2_tracker import SAM2Tracker, REF_ID_OFFSET
+
+# Analytics — all optional imports so the pipeline still runs without them
+try:
+    from analytics.homography import HomographyTransformer
+    from analytics.heatmap import HeatmapBuilder
+    from analytics.distance import build_report as build_distance_report
+    from analytics.distance import export_csv as export_distance_csv
+    from analytics.speed import build_speed_report, export_csv as export_speed_csv
+    _ANALYTICS_AVAILABLE = True
+except ImportError as _e:
+    _ANALYTICS_AVAILABLE = False
+    print(f"[Main] Analytics modules not found ({_e}). "
+          f"Distance/speed/heatmap will be skipped.")
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -51,10 +81,14 @@ SHOW_TEAMS        = True
 SHOW_MASKS        = True
 MASK_ALPHA        = 0.55
 
-CHUNK_SIZE        = 60     # reduce to 30 if laptop crashes
+CHUNK_SIZE        = 60
 CHUNK_OVERLAP     = 10
 REPROMPT_INTERVAL = 30
 GPU_SCALE         = 0.5
+
+# Mini-court overlay size (fraction of video width)
+MINIMAP_WIDTH_FRAC = 0.22
+MINIMAP_ALPHA      = 0.82    # blend opacity
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -71,6 +105,21 @@ def parse_args():
     p.add_argument("--no-trails",  action="store_true")
     p.add_argument("--no-masks",   action="store_true")
     p.add_argument("--device",     default="cuda")
+    # ── Analytics ─────────────────────────────────────────────────────────────
+    p.add_argument(
+        "--homography", default=None, metavar="PATH",
+        help="Path to saved homography .npz file (enables heatmaps + "
+             "real-world distance/speed). Generate with scripts/calibrate.py.",
+    )
+    p.add_argument(
+        "--meters-per-pixel", type=float, default=None, metavar="SCALE",
+        help="Real-world scale factor (e.g. 0.0264 for 1280-px wide frame). "
+             "Enables m/s and metre columns in the CSV reports.",
+    )
+    p.add_argument(
+        "--no-analytics", action="store_true",
+        help="Skip all analytics (distance, speed, heatmap).",
+    )
     return p.parse_args()
 
 
@@ -139,6 +188,81 @@ def save_trajectories(trajectories, path):
     print(f"[Main] Trajectories → {path}")
 
 
+# ── Analytics helpers ─────────────────────────────────────────────────────────
+
+def _trajectories_for_analytics(
+    filled: dict[int, list[tuple]],
+) -> tuple[dict[str, list], dict[str, list]]:
+    """
+    Convert the internal filled-trajectory dict to the format expected by
+    distance.py and speed.py: {str_id: [[x, y, frame], ...]}.
+
+    Returns (player_trajs, ref_trajs).
+    """
+    players: dict[str, list] = {}
+    refs:    dict[str, list] = {}
+    for tid, pts in filled.items():
+        data = [[round(cx, 2), round(cy, 2), fi] for cx, cy, fi in pts]
+        if tid >= REF_ID_OFFSET:
+            refs[str(tid - REF_ID_OFFSET)] = data
+        else:
+            players[str(tid)] = data
+    return players, refs
+
+
+def _draw_minimap(
+    frame:       np.ndarray,
+    transformer: "HomographyTransformer",
+    frame_dets:  list[dict],
+    map_w:       int,
+    map_h:       int,
+) -> np.ndarray:
+    """
+    Draw a scaled-down top-down court with live player dots into the
+    bottom-left corner of the frame.
+    """
+    canvas = transformer.make_court_canvas()
+
+    # Collect players already transformed to court coords
+    players_on_court = []
+    for det in frame_dets:
+        if det.get("class_id") != CLASS_PLAYER:
+            continue
+        tid     = det.get("track_id", -1)
+        team_id = det.get("team_id", -1)
+        try:
+            cx, cy = transformer.transform_bbox_foot(det["bbox"])
+        except Exception:
+            continue
+        if not transformer.is_on_court((cx, cy), margin=20):
+            continue
+        players_on_court.append({
+            "court_pos": (cx, cy),
+            "team_id":   team_id,
+            "track_id":  tid,
+        })
+
+    canvas = transformer.draw_players_on_canvas(
+        canvas, players_on_court, team_colors=TEAM_COLORS,
+    )
+
+    # Scale to minimap size
+    mini = cv2.resize(canvas, (map_w, map_h), interpolation=cv2.INTER_AREA)
+
+    # Paste into bottom-left with alpha blending
+    fh, fw = frame.shape[:2]
+    y1, y2 = fh - map_h - 8, fh - 8
+    x1, x2 = 8, 8 + map_w
+
+    roi = frame[y1:y2, x1:x2].astype(np.float32)
+    blended = (mini.astype(np.float32) * MINIMAP_ALPHA +
+               roi * (1.0 - MINIMAP_ALPHA)).astype(np.uint8)
+    frame[y1:y2, x1:x2] = blended
+    # Border
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (200, 200, 200), 1)
+    return frame
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 def run_pipeline(args):
     if not os.path.exists(args.model):
@@ -150,6 +274,8 @@ def run_pipeline(args):
             "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"
         )
 
+    run_analytics = _ANALYTICS_AVAILABLE and not args.no_analytics
+
     print("\n" + "═" * 60)
     print("  BASKETBALL ANALYTICS — SAM2 PIPELINE (Chunked)")
     print("═" * 60)
@@ -159,6 +285,39 @@ def run_pipeline(args):
     # ── 1. Load video ─────────────────────────────────────────────────────────
     frames, fps, width, height = load_video(args.video)
     total_frames = len(frames)
+
+    # ── 2. Analytics setup ────────────────────────────────────────────────────
+    transformer:     "HomographyTransformer | None" = None
+    heatmap_builder: "HeatmapBuilder | None"        = None
+
+    if run_analytics:
+        out_dir = os.path.dirname(args.output) or "runs/detect"
+
+        # Homography (optional — enables heatmap + real-world metrics)
+        if args.homography and os.path.exists(args.homography):
+            try:
+                transformer = HomographyTransformer.load(args.homography)
+                heatmap_builder = HeatmapBuilder(transformer)
+                print(f"[Analytics] Homography loaded — heatmaps enabled")
+            except Exception as e:
+                print(f"[Analytics] Warning: could not load homography ({e}). "
+                      f"Heatmaps disabled.")
+        elif args.homography:
+            print(f"[Analytics] Warning: homography file not found: {args.homography}. "
+                  f"Run scripts/calibrate.py first.")
+
+        if transformer is None:
+            print("[Analytics] No homography — heatmaps and minimap disabled. "
+                  "Distance/speed will use pixel units.")
+
+        # Pre-compute minimap dimensions
+        minimap_w = int(width * MINIMAP_WIDTH_FRAC)
+        minimap_h = int(minimap_w * (
+            transformer.court_height_px / transformer.court_width_px
+            if transformer else 0.53
+        ))
+    else:
+        minimap_w = minimap_h = 0
 
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 1 — YOLO detects all anchor frames then is deleted from GPU
@@ -214,7 +373,7 @@ def run_pipeline(args):
     print("[Phase 2] SAM2 removed from GPU\n")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PHASE 3 — Ball + Team clustering + write video
+    # PHASE 3 — Ball + Team clustering + Analytics + write video
     # ══════════════════════════════════════════════════════════════════════════
     print("[Phase 3] Writing output video…")
     ball_tracker = BallTracker(
@@ -233,18 +392,25 @@ def run_pipeline(args):
 
         ball_tracker.update(frame, frame_idx)
 
+        # Team clustering — must happen before heatmap so team_id is set
         clusterer.update(frame, frame_dets)
         for det in frame_dets:
             tid = det["track_id"]
             if tid != -1:
                 det["team_id"] = clusterer.get_team(tid)
 
+        # Trajectory accumulation
         for det in frame_dets:
             tid = det["track_id"]
             if tid != -1:
                 cx, cy = det["center"]
                 trajectories[tid].append((cx, cy, frame_idx))
 
+        # ── Heatmap accumulation (per-frame, needs team_id already set) ──────
+        if heatmap_builder is not None:
+            heatmap_builder.add_frame(frame_dets)
+
+        # ── Render ────────────────────────────────────────────────────────────
         vis = draw_fn(
             frame, frame_dets,
             show_trails = SHOW_TRAILS and not args.no_trails,
@@ -254,6 +420,12 @@ def run_pipeline(args):
             mask_alpha  = MASK_ALPHA,
         )
         vis = ball_tracker.draw(vis, frame_idx, trail_len=0)
+
+        # ── Mini-court overlay ────────────────────────────────────────────────
+        if transformer is not None and minimap_w > 0:
+            vis = _draw_minimap(
+                vis, transformer, frame_dets, minimap_w, minimap_h,
+            )
 
         t_now       = time.perf_counter()
         fps_display = 0.9 * fps_display + 0.1 / max(t_now - t_prev, 1e-6)
@@ -271,7 +443,9 @@ def run_pipeline(args):
     writer.release()
     print(f"\n[Main] Video → {args.output}")
 
-    # ── Post-loop ─────────────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    # POST-LOOP — refine, interpolate, analytics
+    # ══════════════════════════════════════════════════════════════════════════
     print("[Main] Refining team clustering…")
     clusterer.refine()
 
@@ -280,9 +454,43 @@ def run_pipeline(args):
     filled = interpolator.stitch_out_of_bounds(filled, frame_width=width)
     save_trajectories(filled, args.traj)
 
+    # ── Analytics reports ─────────────────────────────────────────────────────
+    if run_analytics:
+        out_dir = os.path.dirname(args.output) or "runs/detect"
+        mpp     = args.meters_per_pixel   # may be None
+
+        player_trajs, _ = _trajectories_for_analytics(filled)
+
+        # Distance report
+        print("[Analytics] Computing distance report…")
+        dist_rows = build_distance_report(player_trajs, meters_per_pixel=mpp)
+        export_distance_csv(dist_rows, os.path.join(out_dir, "distance_report.csv"))
+
+        # Speed report
+        print("[Analytics] Computing speed report…")
+        speed_rows = build_speed_report(player_trajs, fps=fps, meters_per_pixel=mpp)
+        export_speed_csv(speed_rows, os.path.join(out_dir, "speed_report.csv"))
+
+        # Heatmaps
+        if heatmap_builder is not None:
+            print("[Analytics] Saving heatmaps…")
+            for team_id, name in ((TEAM_A, "team_a"), (TEAM_B, "team_b")):
+                path = os.path.join(out_dir, f"heatmap_{name}.png")
+                saved = heatmap_builder.save_team_heatmap(team_id, path)
+                if saved:
+                    print(f"[Analytics] Heatmap → {path}")
+                else:
+                    print(f"[Analytics] No data for {name} — heatmap skipped")
+
     print(f"\n{'═'*60}")
     print(f"  DONE  |  {args.output}")
     print(f"  Players: {total_players}  Refs: {total_refs}")
+    if run_analytics:
+        unit = "m" if args.meters_per_pixel else "px"
+        print(f"  Analytics: distance + speed ({unit}) saved to "
+              f"{os.path.dirname(args.output) or 'runs/detect'}/")
+        if heatmap_builder:
+            print(f"  Heatmaps:  team_a + team_b saved")
     print(f"{'═'*60}\n")
 
 

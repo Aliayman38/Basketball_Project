@@ -42,11 +42,11 @@ try:
 except ImportError:
     _SAM2_AVAILABLE = False
 
-from src.team_clustering.clusterer import (
+from team_clustering.clusterer import (
     CLASS_PLAYER, CLASS_REF,
     TEAM_UNKNOWN, TEAM_COLORS, TEAM_NAMES,
 )
-from src.detection.detector import CLASS_ID_TO_NAME, _DEFAULT_CLASS_COLORS
+from detection.detector import CLASS_ID_TO_NAME, _DEFAULT_CLASS_COLORS
 
 
 REF_ID_OFFSET    = 10_000

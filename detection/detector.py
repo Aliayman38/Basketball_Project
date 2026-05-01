@@ -28,7 +28,7 @@ import numpy as np
 from ultralytics import YOLO
 
 # ── Single source of truth for class IDs ─────────────────────────────────────
-from src.team_clustering.clusterer import (
+from team_clustering.clusterer import (
     CLASS_BALL,
     CLASS_CLOCK,
     CLASS_HOOP,

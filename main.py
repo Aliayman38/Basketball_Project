@@ -26,13 +26,13 @@ from collections import defaultdict
 import cv2
 import numpy as np
 
-from src.detection.ball_tracker import BallTracker
-from src.detection.detector import BasketballDetector
-from src.team_clustering.clusterer import (
+from detection.ball_tracker import BallTracker
+from detection.detector import BasketballDetector
+from team_clustering.clusterer import (
     TeamClusterer, TEAM_UNKNOWN, TEAM_REF, CLASS_PLAYER, CLASS_REF,
 )
-from src.tracking.interpolator import TrajectoryInterpolator
-from src.tracking.sam2_tracker import SAM2Tracker, REF_ID_OFFSET
+from tracking.interpolator import TrajectoryInterpolator
+from tracking.sam2_tracker import SAM2Tracker, REF_ID_OFFSET
 
 
 # ── Config ────────────────────────────────────────────────────────────────────

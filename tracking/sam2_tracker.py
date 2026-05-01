@@ -66,20 +66,59 @@ def free_memory():
         torch.cuda.synchronize()
 
 
-def cleanup_mask(mask: np.ndarray, max_dist_ratio: float = 0.3) -> np.ndarray:
+def cleanup_mask(
+    mask: np.ndarray,
+    max_dist_ratio:   float = 0.3,
+    max_aspect_ratio: float = 1.8,
+    max_area_ratio:   float = 0.12,
+) -> np.ndarray:
+    """
+    Remove spurious blobs and floor/ground bleed from a SAM2 mask.
+
+    Stage 1 — connected-component pruning:
+        Keep the largest blob and any blob whose centroid is within
+        max_dist_ratio × frame diagonal of the main blob.
+
+    Stage 2 — aspect-ratio guard (floor bleed):
+        Players are taller than wide.  If the surviving mask's bounding box
+        has width / height > max_aspect_ratio the mask has bled onto the floor.
+        We trim everything below 55% of the bbox height, keeping the torso
+        and dropping the horizontal floor extension.
+
+    Stage 3 — area guard (entire painted lane):
+        If the mask still covers more than max_area_ratio of the frame area
+        it cannot be a single player — discard it entirely.
+    """
     mask_u8 = mask.astype(np.uint8) * 255
     n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_u8, 8)
+
     if n <= 2:
-        return mask
-    sizes    = stats[1:, cv2.CC_STAT_AREA]
-    main_idx = int(np.argmax(sizes)) + 1
-    mx, my   = centroids[main_idx]
-    diag     = np.sqrt(mask.shape[0] ** 2 + mask.shape[1] ** 2)
-    clean    = np.zeros_like(mask)
-    for i in range(1, n):
-        cx, cy = centroids[i]
-        if i == main_idx or np.hypot(cx - mx, cy - my) <= max_dist_ratio * diag:
-            clean[labels == i] = True
+        clean = mask.copy()
+    else:
+        sizes    = stats[1:, cv2.CC_STAT_AREA]
+        main_idx = int(np.argmax(sizes)) + 1
+        mx, my   = centroids[main_idx]
+        diag     = np.sqrt(mask.shape[0] ** 2 + mask.shape[1] ** 2)
+        clean    = np.zeros_like(mask)
+        for i in range(1, n):
+            cx, cy = centroids[i]
+            if i == main_idx or np.hypot(cx - mx, cy - my) <= max_dist_ratio * diag:
+                clean[labels == i] = True
+
+    # Stage 2: aspect-ratio guard
+    rows = np.where(np.any(clean, axis=1))[0]
+    cols = np.where(np.any(clean, axis=0))[0]
+    if rows.size and cols.size:
+        h_span = int(rows[-1] - rows[0]) + 1
+        w_span = int(cols[-1] - cols[0]) + 1
+        if h_span > 0 and w_span / h_span > max_aspect_ratio:
+            y_cut = int(rows[0] + h_span * 0.55)
+            clean[y_cut:, :] = False
+
+    # Stage 3: area guard
+    if clean.sum() > max_area_ratio * mask.shape[0] * mask.shape[1]:
+        return np.zeros_like(mask)
+
     return clean
 
 
@@ -221,6 +260,7 @@ class SAM2Tracker:
                 chunk_anchors = chunk_anchors,
                 is_first      = (chunk_idx == 0),
                 frame0_dets   = frame0_dets if chunk_idx == 0 else None,
+                history_skip  = self.chunk_overlap if chunk_idx > 0 else 0,
             )
 
             # Skip overlap frames from non-first chunks to avoid duplicates
@@ -248,6 +288,7 @@ class SAM2Tracker:
         chunk_anchors: dict[int, list[dict]],
         is_first:      bool,
         frame0_dets:   list[dict] | None,
+        history_skip:  int = 0,
     ) -> dict[int, list[dict]]:
         temp_dir = tempfile.mkdtemp(prefix="sam2_chunk_")
         h0, w0   = chunk_frames[0].shape[:2]
@@ -309,7 +350,11 @@ class SAM2Tracker:
                         cid = self._track_class.get(track_id, CLASS_PLAYER)
 
                         self._last_pos[track_id] = (cx, cy)
-                        self._append_history(track_id, (cx, cy))
+                        # Only append history for frames outside the overlap window.
+                        # Overlap frames were already appended by the previous chunk;
+                        # writing them again creates zigzag artifacts in the trail.
+                        if fi >= history_skip:
+                            self._append_history(track_id, (cx, cy))
 
                         if cid == CLASS_PLAYER:
                             self._all_player_ids.add(track_id)
@@ -456,16 +501,25 @@ class SAM2Tracker:
             else:
                 cv2.rectangle(vis, (x1,y1), (x2,y2), color, 2)
 
-            # Motion trail
+            # Motion trail — skip segments too faint or physically impossible
+            # (large jumps are chunk-boundary artifacts, not real movement)
             if show_trails:
                 history = self._history.get(tid, [])
-                for i in range(1, len(history)):
-                    alpha = i / len(history)
-                    c     = tuple(int(v * alpha) for v in color)
+                n_hist  = len(history)
+                for i in range(1, n_hist):
+                    alpha = i / n_hist
+                    if alpha < 0.25:
+                        continue
+                    p1, p2 = history[i - 1], history[i]
+                    # A player cannot move more than ~80px between frames at
+                    # normal frame rates — anything larger is a chunk artifact
+                    if np.hypot(p2[0] - p1[0], p2[1] - p1[1]) > 80:
+                        continue
+                    c = tuple(int(v * alpha) for v in color)
                     cv2.line(vis,
-                             (int(history[i-1][0]), int(history[i-1][1])),
-                             (int(history[i][0]),   int(history[i][1])),
-                             c, max(1, int(3*alpha)), cv2.LINE_AA)
+                             (int(p1[0]), int(p1[1])),
+                             (int(p2[0]), int(p2[1])),
+                             c, max(1, int(3 * alpha)), cv2.LINE_AA)
 
             # Label — no bounding box
             if show_ids:

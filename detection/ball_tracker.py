@@ -168,7 +168,9 @@ class BallTracker:
         return self._positions.get(frame_idx)
 
     def get_trail(self, n: int = 20) -> list[tuple[float, float]]:
-        """Return last n confirmed positions (for drawing the motion trail)."""
+        """Return last n confirmed positions.  n=0 → empty list (no trail)."""
+        if n <= 0:
+            return []
         trail = list(self._trail)
         return trail[-n:]
 

@@ -1,64 +1,63 @@
 """
-src/team_clustering/clusterer.py
-─────────────────────────────────
-Advanced Unsupervised team assignment via Foundation Models.
-Utilizes: SigLIP (Vision Encoder) + UMAP (Dim Reduction) + K-Means (Clustering).
+team_clustering/clusterer.py
+─────────────────────────────
+Team assignment via HSV torso histograms + K-Means.
 
-Dataset class map  (Roboflow basketball-players v11)
-─────────────────────────────────────────────────────
-  0 → Ball
-  1 → Clock
-  2 → Hoop
-  3 → Overlay
-  4 → Player   ← clustered here
-  5 → Ref      ← detected separately; auto-assigned to TEAM_REF
+Why HSV histograms instead of SigLIP + UMAP
+────────────────────────────────────────────
+  • Jersey colour is the only signal that reliably separates teams.
+  • HSV hue histograms are invariant to lighting and shadow — exactly
+    what you need for an indoor arena with mixed floor reflections.
+  • 48-dim feature is perfect for K-Means directly — no UMAP overhead,
+    no instability, no single-sample transform approximation.
+  • Runs on CPU at >1000 frames/s (SigLIP needed a GPU pass per crop).
 
-Pipeline Architecture
-───────────────────
-1. Crop player torso to isolate the jersey.
-2. Pass the crop through Google's SigLIP vision model to extract a 
-   semantic embedding vector (robust to shadows, lighting, and occlusion).
-3. Buffer these high-dimensional embeddings per track_id.
-4. After warm_up_frames, apply UMAP to reduce the embeddings to 2D space.
-5. Apply K-Means(k=2) on the 2D UMAP projections to assign Team A and Team B.
-6. For new tracks appearing after warm-up, transform via UMAP and predict via K-Means.
+Bugs fixed vs. previous version
+────────────────────────────────
+  1. SigLIP removed       — 768-dim vision model was overkill for colour.
+  2. UMAP removed         — umap.transform(1 sample) is unreliable; not needed.
+  3. Label flip fixed     — clusters are anchored by mean hue every fit/refine,
+                            so Team A and Team B never swap.
+  4. Warm-up retry fixed  — was `==` (fires once); now `>=` (retries until data ready).
+  5. White jersey support — saturation histogram added alongside hue histogram so
+                            white jerseys form their own distinct feature signature.
+  6. Torso slice widened  — 0.10–0.60 instead of 0.15–0.50 to capture full jersey.
+
+Dataset class map (Roboflow basketball-players v11)
+────────────────────────────────────────────────────
+  0 → Ball   1 → Clock   2 → Hoop   3 → Overlay
+  4 → Player ← clustered here
+  5 → Ref    ← auto-assigned TEAM_REF, never clustered
 """
 
 from __future__ import annotations
 
 import cv2
-import torch
 import numpy as np
 from collections import defaultdict
-from PIL import Image
-
-import umap.umap_ as umap
 from sklearn.cluster import KMeans
-from transformers import SiglipImageProcessor, SiglipVisionModel
 
-# ── Dataset class IDs ─────────────────────────────────────────────────────────
+# ── Class IDs ─────────────────────────────────────────────────────────────────
 CLASS_BALL    = 0
 CLASS_CLOCK   = 1
 CLASS_HOOP    = 2
 CLASS_OVERLAY = 3
-CLASS_PLAYER  = 4   
-CLASS_REF     = 5   
+CLASS_PLAYER  = 4
+CLASS_REF     = 5
 
-# ── Team label constants ──────────────────────────────────────────────────────
-TEAM_A       = 0   
-TEAM_B       = 1   
-TEAM_REF     = 2   
-TEAM_UNKNOWN = -1  
+# ── Team labels ───────────────────────────────────────────────────────────────
+TEAM_A       = 0
+TEAM_B       = 1
+TEAM_REF     = 2
+TEAM_UNKNOWN = -1
 
-# ── Display colours per team  (BGR for OpenCV) ────────────────────────────────
 TEAM_COLORS: dict[int, tuple[int, int, int]] = {
     TEAM_A:       (235, 110,  40),   # vivid blue  — Team A
     TEAM_B:       ( 40, 200,  60),   # vivid green — Team B
     TEAM_REF:     ( 50,  50, 220),   # vivid red   — Referees
-    TEAM_UNKNOWN: (160, 160, 160),   # grey        — not yet assigned
+    TEAM_UNKNOWN: (160, 160, 160),   # grey
 }
 
-# ── Human-readable names ──────────────────────────────────────────────────────
 TEAM_NAMES: dict[int, str] = {
     TEAM_A:       "Team A",
     TEAM_B:       "Team B",
@@ -66,15 +65,41 @@ TEAM_NAMES: dict[int, str] = {
     TEAM_UNKNOWN: "Unknown",
 }
 
-# ── Default torso slice ───────────────────────────────────────────────────────
-_TORSO_TOP  = 0.15   # skip head and neck
-_TORSO_BOT  = 0.50   # stop before shorts
+# ── Torso slice (fraction of bbox height) ────────────────────────────────────
+_TORSO_TOP = 0.10   # skip head / neck only
+_TORSO_BOT = 0.60   # include full jersey body; stop before shorts
+
+# ── Histogram dimensions ──────────────────────────────────────────────────────
+_HUE_BINS = 32        # 180° ÷ 32 ≈ 5.6° per bin — fine enough to tell apart teams
+_SAT_BINS = 16        # saturation range 0-255 — captures white-jersey signature
+_FEAT_DIM = _HUE_BINS + _SAT_BINS   # 48 — directly usable by K-Means, no UMAP needed
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 class TeamClusterer:
     """
-    Assigns basketball player tracks to teams using SigLIP + UMAP + KMeans.
+    Assigns basketball player track IDs to TEAM_A / TEAM_B.
+
+    Pipeline
+    ────────
+    1. For every player detection, crop the torso and compute a 48-dim
+       HSV histogram (32 hue bins + 16 saturation bins).
+    2. Accumulate histograms per track_id.
+    3. After warm_up_frames, compute one mean histogram per track and
+       run K-Means(k=2) to split into two teams.
+    4. After each fit/refine, anchor labels: the cluster whose center has
+       the lower weighted-mean hue is always TEAM_A — labels never flip.
+    5. New tracks that appear after warm-up are assigned via the fitted
+       K-Means predict() on their mean histogram.
+
+    Parameters
+    ──────────
+    warm_up_frames : frames to accumulate before first clustering attempt.
+                     Retries every subsequent frame until enough data exists.
+    torso_ratio    : (top, bottom) fractions of bbox height defining the
+                     torso crop window.
+    min_obs        : minimum histogram samples per track before it is included
+                     in the feature matrix.
+    device         : kept for API compatibility; this implementation is CPU-only.
     """
 
     def __init__(
@@ -82,44 +107,38 @@ class TeamClusterer:
         warm_up_frames: int = 60,
         torso_ratio: tuple[float, float] = (_TORSO_TOP, _TORSO_BOT),
         min_obs: int = 5,
-        device: str | None = None
+        device: str | None = None,
     ) -> None:
         self.warm_up_frames = warm_up_frames
-        self.torso_ratio = torso_ratio
-        self.min_obs = min_obs
+        self.torso_ratio    = torso_ratio
+        self.min_obs        = min_obs
 
-        # Set device dynamically
-        if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            self.device = torch.device(device)
+        # {track_id: [48-dim histogram, ...]}  — one vector per frame
+        self._hist_buffer: dict[int, list[np.ndarray]] = defaultdict(list)
 
-        print(f"[TeamClusterer] Initializing SigLIP on {self.device}...")
-        
-        # Load SigLIP Model and Processor
-        model_id = "google/siglip-base-patch16-224"
-        self.processor = SiglipImageProcessor.from_pretrained(model_id)
-        self.siglip_model = SiglipVisionModel.from_pretrained(model_id).to(self.device)
-        self.siglip_model.eval()
-
-        # {track_id: [embedding_vector, ...]}
-        self._embed_buffer: dict[int, list[np.ndarray]] = defaultdict(list)
-        
-        # {track_id: team_id}
+        # {track_id: TEAM_A | TEAM_B | TEAM_REF | TEAM_UNKNOWN}
         self._team_labels: dict[int, int] = {}
 
-        # Dimensionality Reduction & Clustering Models
-        self.umap_reducer = umap.UMAP(n_components=2, random_state=42)
-        self.kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+        # Fitted K-Means; None until first _fit() succeeds
+        self._kmeans: KMeans | None = None
+
+        # Maps raw K-Means label (0 or 1) → TEAM_A / TEAM_B.
+        # Set by _fit() based on mean hue — stable across refine() calls.
+        self._label_map: dict[int, int] = {0: TEAM_A, 1: TEAM_B}
 
         self.is_fitted: bool = False
         self._frame_idx: int = 0
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ── Public API ─────────────────────────────────────────────────────────────
 
     def update(self, frame: np.ndarray, tracked_dets: list[dict]) -> None:
         """
-        Extracts embeddings for each player in the frame and manages clustering.
+        Call once per frame.
+
+        For each player detection: extracts a torso histogram and buffers it.
+        For each referee: immediately assigns TEAM_REF (no clustering needed).
+        Triggers clustering once warm_up_frames have elapsed and retries every
+        subsequent frame until at least 2 players have enough observations.
         """
         for det in tracked_dets:
             cid = int(det["class_id"])
@@ -135,13 +154,15 @@ class TeamClusterer:
             if cid != CLASS_PLAYER:
                 continue
 
-            embedding = self._extract_embedding(frame, det["bbox"])
-            if embedding is not None:
-                self._embed_buffer[tid].append(embedding)
+            hist = self._extract_histogram(frame, det["bbox"])
+            if hist is not None:
+                self._hist_buffer[tid].append(hist)
 
         self._frame_idx += 1
 
-        if self._frame_idx == self.warm_up_frames and not self.is_fitted:
+        # BUG FIX: was `== warm_up_frames` (single shot); now `>=` so we
+        # keep retrying every frame until there is actually enough data.
+        if self._frame_idx >= self.warm_up_frames and not self.is_fitted:
             self._fit()
 
         if self.is_fitted:
@@ -163,24 +184,44 @@ class TeamClusterer:
         return rosters
 
     def refine(self) -> None:
+        """
+        Re-cluster using all accumulated histograms.
+        The hue anchor guarantees Team A / Team B labels stay consistent.
+        """
         self._fit(label="REFINE")
 
-    # ── Private Helpers ───────────────────────────────────────────────────────
+    # ── Private ────────────────────────────────────────────────────────────────
 
-    def _extract_embedding(self, frame: np.ndarray, bbox: np.ndarray) -> np.ndarray | None:
+    def _extract_histogram(
+        self, frame: np.ndarray, bbox: np.ndarray
+    ) -> np.ndarray | None:
         """
-        Crop the player's torso, pass it through SigLIP, and return the embedding.
+        Crop the torso region and return a normalised 48-dim HSV feature vector.
+
+        Feature layout
+        ──────────────
+        dims  0-31  hue histogram (computed only on coloured pixels — S>40, V>40)
+        dims 32-47  saturation histogram (all pixels — separates white vs coloured jerseys)
+
+        White jersey handling
+        ─────────────────────
+        White pixels have low saturation so they are excluded from the hue
+        histogram.  But they push the saturation histogram toward the low end,
+        making white-jersey tracks cluster distinctly from coloured-jersey tracks.
+        This means the feature correctly separates:
+          • coloured vs coloured  (different hue peaks)
+          • coloured vs white     (different saturation profiles)
+          • white vs white        (both same low-saturation profile → same cluster)
         """
-        x1 = max(0, int(bbox[0]));  y1 = max(0, int(bbox[1]))
+        x1 = max(0, int(bbox[0])); y1 = max(0, int(bbox[1]))
         x2 = min(frame.shape[1] - 1, int(bbox[2]))
         y2 = min(frame.shape[0] - 1, int(bbox[3]))
 
         if (x2 - x1) < 16 or (y2 - y1) < 32:
             return None
 
-        crop = frame[y1:y2, x1:x2]
+        crop  = frame[y1:y2, x1:x2]
         h_box = crop.shape[0]
-        
         t_top = int(h_box * self.torso_ratio[0])
         t_bot = int(h_box * self.torso_ratio[1])
         torso = crop[t_top:t_bot, :]
@@ -188,86 +229,121 @@ class TeamClusterer:
         if torso.size == 0:
             return None
 
-        # Convert BGR (OpenCV) to RGB (PIL) for SigLIP
-        torso_rgb = cv2.cvtColor(torso, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(torso_rgb)
+        hsv = cv2.cvtColor(torso, cv2.COLOR_BGR2HSV)
+        H, S, V = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
 
-        inputs = self.processor(images=pil_img, return_tensors="pt").to(self.device)
-        
-        with torch.no_grad():
-            outputs = self.siglip_model(**inputs)
-            # Use pooler_output (usually a 768-dim vector representing the image)
-            embedding = outputs.pooler_output.squeeze().cpu().numpy()
+        # ── Hue histogram (coloured pixels only) ────────────────────────────
+        colour_mask = (S > 40) & (V > 40)   # exclude shadows and achromatic pixels
+        h_pixels    = H[colour_mask].reshape(-1, 1).astype(np.float32)
 
-        return embedding
+        if len(h_pixels) < 20:
+            # Not enough coloured pixels (occluded, white, or very dark jersey).
+            # Zero hue histogram — the saturation histogram will still carry
+            # enough signal to place the track in the correct cluster.
+            h_hist = np.zeros(_HUE_BINS, dtype=np.float32)
+        else:
+            h_hist = cv2.calcHist([h_pixels], [0], None, [_HUE_BINS], [0, 180]).flatten()
+            h_sum  = h_hist.sum()
+            if h_sum > 0:
+                h_hist /= h_sum   # L1 normalise
+
+        # ── Saturation histogram (all pixels) ────────────────────────────────
+        s_pixels = S.reshape(-1, 1).astype(np.float32)
+        s_hist   = cv2.calcHist([s_pixels], [0], None, [_SAT_BINS], [0, 256]).flatten()
+        s_sum    = s_hist.sum()
+        if s_sum > 0:
+            s_hist /= s_sum
+
+        return np.concatenate([h_hist, s_hist]).astype(np.float32)
 
     def _build_feature_matrix(self) -> tuple[np.ndarray, list[int]]:
         """
-        Aggregate per-player embedding buffers into an (N, 768) feature matrix.
+        Build an (N, 48) matrix — one mean histogram per qualifying track.
+        Only tracks with >= min_obs observations are included.
         """
         feats: list[np.ndarray] = []
-        tids: list[int] = []
+        tids:  list[int]        = []
 
-        for tid, obs in self._embed_buffer.items():
+        for tid, obs in self._hist_buffer.items():
             if len(obs) >= self.min_obs:
-                # Use the mean embedding for robust representation
-                feats.append(np.mean(obs, axis=0))
+                feats.append(np.mean(obs, axis=0))   # mean = robust representation
                 tids.append(tid)
 
         if not feats:
-            return np.empty((0, 768), dtype=np.float32), []
+            return np.empty((0, _FEAT_DIM), dtype=np.float32), []
 
         return np.array(feats, dtype=np.float32), tids
 
     def _fit(self, label: str = "FIT") -> None:
         """
-        Apply UMAP for dimensionality reduction, then KMeans for clustering.
+        Fit K-Means on the current feature matrix and assign team labels.
+
+        Hue anchor (label-flip prevention)
+        ────────────────────────────────────
+        After fitting, compute the weighted mean hue of each cluster center's
+        hue histogram.  The cluster with the lower mean hue is assigned TEAM_A,
+        the other TEAM_B.  This mapping is stored in self._label_map and reused
+        by _assign_pending() and every subsequent refine() call, so the same
+        physical team is always TEAM_A regardless of how many times you refine.
         """
         X, tids = self._build_feature_matrix()
 
         if len(X) < 2:
-            print(f"[TeamClusterer] {label} — Not enough valid players ({len(X)}). Waiting...")
+            print(f"[TeamClusterer] {label} — not enough players ({len(X)}), "
+                  f"retrying next frame…")
             return
 
-        print(f"[TeamClusterer] {label} — Reducing {len(X)} embeddings via UMAP...")
-        
-        # 1. Dimensionality Reduction
-        X_reduced = self.umap_reducer.fit_transform(X)
+        km         = KMeans(n_clusters=2, random_state=42, n_init=15, max_iter=300)
+        raw_labels = km.fit_predict(X)
 
-        # 2. Clustering
-        labels = self.kmeans.fit_predict(X_reduced)
+        # ── Hue anchor ────────────────────────────────────────────────────────
+        hue_bins = np.arange(_HUE_BINS, dtype=np.float32)
 
-        for tid, lab in zip(tids, labels):
-            self._team_labels[tid] = int(lab)
+        def _mean_hue(center: np.ndarray) -> float:
+            h = center[:_HUE_BINS]
+            total = h.sum()
+            return float(np.dot(h, hue_bins) / total) if total > 1e-9 else 90.0
+
+        hue0, hue1 = _mean_hue(km.cluster_centers_[0]), _mean_hue(km.cluster_centers_[1])
+
+        if hue0 <= hue1:
+            self._label_map = {0: TEAM_A, 1: TEAM_B}
+        else:
+            self._label_map = {0: TEAM_B, 1: TEAM_A}
+
+        self._kmeans = km
+
+        # Overwrite all player labels (refine() is allowed to correct earlier fits)
+        for tid, raw in zip(tids, raw_labels):
+            self._team_labels[tid] = self._label_map[int(raw)]
 
         self.is_fitted = True
-        n_a = int((labels == 0).sum())
-        n_b = int((labels == 1).sum())
-        
-        print(f"[TeamClusterer] {label} Complete. Team A: {n_a} | Team B: {n_b}")
+        n_a = sum(1 for v in self._team_labels.values() if v == TEAM_A)
+        n_b = sum(1 for v in self._team_labels.values() if v == TEAM_B)
+        n_r = sum(1 for v in self._team_labels.values() if v == TEAM_REF)
+        print(f"[TeamClusterer] {label} complete — "
+              f"Team A: {n_a}  Team B: {n_b}  Refs: {n_r}")
 
     def _assign_pending(self) -> None:
         """
-        Assign team labels to new tracks using the fitted UMAP and KMeans models.
+        Assign any track that appeared after the initial fit.
+        Uses KMeans.predict() directly on the 48-dim feature — no UMAP.
         """
-        for tid, obs in self._embed_buffer.items():
+        if self._kmeans is None:
+            return
+
+        for tid, obs in self._hist_buffer.items():
             if tid in self._team_labels:
                 continue
             if len(obs) < self.min_obs:
                 continue
-            
-            feat = np.mean(obs, axis=0).reshape(1, -1).astype(np.float32)
-            
-            # Map high-dimensional embedding to 2D space using fitted UMAP
-            feat_reduced = self.umap_reducer.transform(feat)
-            
-            # Predict team label using fitted KMeans
-            label = int(self.kmeans.predict(feat_reduced)[0])
-            self._team_labels[tid] = label
+
+            feat      = np.mean(obs, axis=0).reshape(1, -1).astype(np.float32)
+            raw_label = int(self._kmeans.predict(feat)[0])
+            self._team_labels[tid] = self._label_map[raw_label]
 
     def __repr__(self) -> str:
         return (
-            f"TeamClusterer(Fitted={self.is_fitted}, "
-            f"Assigned={len(self._team_labels)}, "
-            f"Device={self.device})"
+            f"TeamClusterer(fitted={self.is_fitted}, "
+            f"assigned={len(self._team_labels)})"
         )

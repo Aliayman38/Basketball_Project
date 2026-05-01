@@ -1,0 +1,8 @@
+# config/custom_tracker.yaml
+tracker_type: botsort    # BoT-SORT is better for sports than ByteTrack
+track_high_thresh: 0.3   # Confidence threshold for the first association
+track_low_thresh: 0.1    # Confidence threshold for the second association
+new_track_thresh: 0.4    # Threshold to initialize a completely new track
+track_buffer: 120        # Memory: Keep lost tracks alive for 120 frames (~4 seconds) before deleting them
+match_thresh: 0.8        # Threshold for matching boxes
+gmc_method: sparseOptFlow # Global Motion Compensation (handles camera panning!)

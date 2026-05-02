@@ -1,44 +1,26 @@
 """
-src/detection/ball_tracker.py  (v2 — high-accuracy rewrite)
-─────────────────────────────
-5-layer ball tracking pipeline that handles:
-  1. YOLO ultra-low conf (0.07) + Kalman distance gate  → max detections
-  2. True SAHI 4-tile inference at 640px                → tiny ball on tiles
-  3. Kalman filter state machine                        → predicts position
-                                                           even in miss frames
-  4. Lucas-Kanade Optical Flow fallback                 → tracks orange blob
-                                                           when YOLO fully fails
-  5. Physics validation                                 → rejects impossible jumps
-
-Why stay on YOLOv11L (not X):
-  - Ball's problem is spatial resolution and strategy, not model capacity
-  - L→X gives only ~2% mAP on COCO; optical flow + Kalman gives far more
-  - X is 50% slower and uses 50% more VRAM
-  - Use that compute budget for SAHI tiling instead
-
-Usage:
-    bt = BallTracker(model_path="best.pt")
-    pos = bt.update(frame, frame_idx)   # (cx, cy) always — never None after warmup
-    trail = bt.get_trail(n=20)          # last n (cx, cy) positions
+src/detection/ball_tracker.py  (v3 — TrackNet primary)
+────────────────────────────────────────────────────────
+Ball tracking: TrackNet primary → YOLO fallback → Optical flow → Kalman → Interpolation
 """
-
 from __future__ import annotations
 import cv2
 import numpy as np
+import torch
 from collections import deque
 from ultralytics import YOLO
+from src.detection.tracknet import TrackNet, heatmap_to_point
 
-CLASS_BALL = 0
+CLASS_BALL           = 0
+TRACKNET_CONF_THR    = 0.50
+YOLO_BALL_CONF       = 0.07
+KALMAN_GATE_PX       = 150
+MAX_INTERP_GAP       = 20
+TRACKNET_W           = 640
+TRACKNET_H           = 360
 
-# ── Physics constants ────────────────────────────────────────────────────────
-MAX_BALL_SPEED_PX_PER_FRAME = 120   # ~15 m/s at typical camera distance
-MAX_KALMAN_GATE_PX          = 150   # reject detections too far from prediction
-MAX_INTERP_GAP              = 20    # fill gaps up to this many frames
-
-# ── Optical flow parameters ──────────────────────────────────────────────────
 LK_PARAMS = dict(
-    winSize=(21, 21),
-    maxLevel=3,
+    winSize=(21, 21), maxLevel=3,
     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03),
 )
 ORANGE_HSV_LOWER = np.array([5,  120, 120], dtype=np.uint8)
@@ -47,458 +29,295 @@ ORANGE_HSV_UPPER = np.array([25, 255, 255], dtype=np.uint8)
 
 class BallTracker:
     """
-    High-accuracy basketball tracker using 5 layered strategies.
-
-    Parameters
-    ----------
-    model_path  : YOLOv11 fine-tuned weights (.pt)
-    ball_conf   : YOLO confidence threshold — ultra low, gated by Kalman
-    imgsz       : inference resolution for full-frame pass
-    use_tiling  : enable SAHI 4-tile inference
-    use_flow    : enable Lucas-Kanade optical flow fallback
-    device      : torch device ('0' or 'cpu')
+    5-layer ball tracker:
+    1. TrackNet  — spatiotemporal heatmap (3 frames stacked)
+    2. YOLO      — single-frame fallback  (conf=0.07)
+    3. Opt. flow — Lucas-Kanade + orange HSV validation
+    4. Kalman    — constant-velocity prediction
+    5. Interp    — linear gap fill ≤ 20 frames
     """
 
     def __init__(
         self,
-        model_path: str   = "best.pt",
-        ball_conf:  float = 0.07,
-        imgsz:      int   = 1280,
-        use_tiling: bool  = True,
-        use_flow:   bool  = True,
-        device:     str   = "0",
+        tracknet_path: str       = "weights/tracknet_best.pt",
+        yolo_path:     str       = "best.pt",
+        device:        str | int = "0",
+        use_flow:      bool      = True,
     ) -> None:
-        self.ball_conf  = ball_conf
-        self.imgsz      = imgsz
-        self.use_tiling = use_tiling
+        self.device_str = str(device)
         self.use_flow   = use_flow
-        self.device     = device
+        self.torch_device = torch.device(
+            "cuda" if torch.cuda.is_available() and str(device) != "cpu" else "cpu"
+        )
 
-        print(f"[BallTracker] Loading: {model_path}")
-        self.model = YOLO(model_path)
+        # TrackNet
+        self._tracknet:   TrackNet | None = None
+        self._tracknet_w: int = TRACKNET_W
+        self._tracknet_h: int = TRACKNET_H
 
-        # ── Kalman filter (state: cx, cy, vx, vy) ────────────────────────
-        self.kf = self._build_kalman()
+        if tracknet_path and _exists(tracknet_path):
+            print(f"[BallTracker] Loading TrackNet <- {tracknet_path}")
+            self._tracknet = self._load_tracknet(tracknet_path)
+            print(f"[BallTracker] TrackNet ready on {self.torch_device}")
+        else:
+            print(f"[BallTracker] WARNING: no TrackNet weights at '{tracknet_path}'")
+            print(f"[BallTracker] Run: python scripts/train_tracknet.py --video game.mp4")
+            print(f"[BallTracker] Falling back to YOLO-only mode.")
+
+        # YOLO fallback
+        print(f"[BallTracker] Loading YOLO <- {yolo_path}")
+        self._yolo = YOLO(yolo_path)
+
+        # Kalman
+        self._kf             = _build_kalman()
         self._kf_initialized = False
 
-        # ── Position history ──────────────────────────────────────────────
-        # {frame_idx: (cx, cy)}  — includes predicted + interpolated frames
-        self._positions: dict[int, tuple[float, float]] = {}
-        # only real detections (YOLO or flow)
-        self._detections: dict[int, tuple[float, float]] = {}
+        # 3-frame buffer for TrackNet
+        self._frame_buf: deque[np.ndarray] = deque(maxlen=3)
 
-        # ── Optical flow state ────────────────────────────────────────────
-        self._prev_gray:  np.ndarray | None = None
-        self._flow_point: np.ndarray | None = None  # shape (1,1,2) float32
-        self._flow_miss_count: int = 0
-        self._flow_max_miss: int = 5    # reset flow after 5 consecutive misses
+        # Position stores
+        self._positions:  dict[int, tuple] = {}
+        self._detections: dict[int, tuple] = {}
+        self._sources:    dict[int, str]   = {}
 
-        # ── Trail buffer (for annotator) ──────────────────────────────────
-        self._trail: deque[tuple[float, float]] = deque(maxlen=30)
+        # Trail
+        self._trail: deque[tuple] = deque(maxlen=30)
+
+        # Optical flow
+        self._prev_gray:       np.ndarray | None = None
+        self._flow_pt:         np.ndarray | None = None
+        self._flow_miss_count: int               = 0
 
         self._last_fidx: int = -1
-        self._source_log: dict[int, str] = {}   # frame → 'yolo'|'flow'|'kalman'|'interp'
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ── Public ────────────────────────────────────────────────────────────────
 
-    def update(
-        self, frame: np.ndarray, frame_idx: int
-    ) -> tuple[float, float] | None:
-        """
-        Process one frame. Returns (cx, cy) — the best ball position.
-
-        Priority: YOLO full-frame → YOLO tiled → Optical flow → Kalman predict
-        After detection: Kalman is updated / corrected.
-        """
+    def update(self, frame: np.ndarray, frame_idx: int) -> tuple | None:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        self._frame_buf.append(frame.copy())
+
         pos, source = None, "none"
 
-        # ── Strategy 1: YOLO full-frame (ultra low conf) ──────────────────
-        yolo_pos = self._yolo_detect(frame, self.imgsz)
-        if yolo_pos and self._kalman_gate(yolo_pos):
-            pos, source = yolo_pos, "yolo"
+        # Layer 1 — TrackNet
+        if self._tracknet is not None and len(self._frame_buf) == 3:
+            tp = self._tracknet_detect()
+            if tp and self._kalman_gate(tp):
+                pos, source = tp, "tracknet"
 
-        # ── Strategy 2: SAHI 4-tile if full-frame missed ──────────────────
-        if pos is None and self.use_tiling:
-            tile_pos = self._sahi_detect(frame)
-            if tile_pos and self._kalman_gate(tile_pos):
-                pos, source = tile_pos, "yolo_tile"
+        # Layer 2 — YOLO
+        if pos is None:
+            yp = self._yolo_detect(frame)
+            if yp and self._kalman_gate(yp):
+                pos, source = yp, "yolo"
 
-        # ── Strategy 3: Lucas-Kanade optical flow ────────────────────────
+        # Layer 3 — Optical flow
         if pos is None and self.use_flow and self._prev_gray is not None:
-            flow_pos = self._optical_flow(gray, frame)
-            if flow_pos and self._kalman_gate(flow_pos):
-                pos, source = flow_pos, "flow"
+            fp = self._optical_flow(gray, frame)
+            if fp and self._kalman_gate(fp):
+                pos, source = fp, "flow"
                 self._flow_miss_count = 0
             else:
                 self._flow_miss_count += 1
-                if self._flow_miss_count > self._flow_max_miss:
-                    self._flow_point = None   # reset stale flow seed
+                if self._flow_miss_count > 5:
+                    self._flow_pt = None
 
-        # ── Update Kalman ─────────────────────────────────────────────────
+        # Layer 4 — Kalman update / predict
         if pos is not None:
-            kf_pos = self._kalman_correct(pos)
-            # Use Kalman-smoothed position (removes single-frame jitter)
-            pos = kf_pos
+            pos = self._kalman_correct(pos)
             self._detections[frame_idx] = pos
             self._update_flow_seed(pos)
-        else:
-            # ── Strategy 4: Kalman prediction (no detection this frame) ──
-            if self._kf_initialized:
-                pos = self._kalman_predict_only()
-                source = "kalman"
-            # else: truly no data yet
+        elif self._kf_initialized:
+            pos    = self._kalman_predict_only()
+            source = "kalman"
 
-        # ── Store position and update trail ───────────────────────────────
+        # Store
         if pos is not None:
             self._positions[frame_idx] = pos
             self._trail.append(pos)
-            self._source_log[frame_idx] = source
+            self._sources[frame_idx] = source
 
-        # ── Post-frame bookkeeping ─────────────────────────────────────────
-        self._prev_gray  = gray.copy()
-        self._last_fidx  = frame_idx
-
-        # Back-fill interpolation between last real detection and now
+        self._prev_gray = gray.copy()
+        self._last_fidx = frame_idx
         self._interpolate_back(frame_idx)
-
         return self._positions.get(frame_idx)
 
-    def get_position(self, frame_idx: int) -> tuple[float, float] | None:
-        return self._positions.get(frame_idx)
+    def get_position(self, fidx: int):
+        return self._positions.get(fidx)
 
-    def get_trail(self, n: int = 20) -> list[tuple[float, float]]:
-        """Return last n confirmed positions.  n=0 → empty list (no trail)."""
-        if n <= 0:
-            return []
-        trail = list(self._trail)
-        return trail[-n:]
+    def get_trail(self, n: int = 25):
+        return list(self._trail)[-n:]
 
-    def get_trajectory(self) -> list[tuple[float, float, int]]:
-        """Full trajectory [(cx, cy, frame_idx)] sorted by frame."""
-        return [(cx, cy, fidx)
-                for fidx, (cx, cy) in sorted(self._positions.items())]
+    def get_source(self, fidx: int) -> str:
+        return self._sources.get(fidx, "none")
 
-    def get_source(self, frame_idx: int) -> str:
-        """Return detection source for a frame: 'yolo','flow','kalman','interp'"""
-        return self._source_log.get(frame_idx, "none")
+    def get_trajectory(self):
+        return [(cx, cy, fi) for fi, (cx, cy) in sorted(self._positions.items())]
 
-    # ── Strategy 1: YOLO full-frame ───────────────────────────────────────────
+    # ── TrackNet ──────────────────────────────────────────────────────────────
 
-    def _yolo_detect(
-        self, frame: np.ndarray, imgsz: int
-    ) -> tuple[float, float] | None:
-        result = self.model(
-            frame,
-            conf=self.ball_conf,
-            iou=0.3,
-            imgsz=imgsz,
-            device=self.device,
-            classes=[CLASS_BALL],
-            verbose=False,
+    def _load_tracknet(self, path: str) -> TrackNet:
+        model = TrackNet(in_frames=3).to(self.torch_device)
+        ckpt  = torch.load(path, map_location=self.torch_device)
+        state = ckpt.get("model", ckpt)
+        model.load_state_dict(state)
+        model.eval()
+        if "input_w" in ckpt:
+            self._tracknet_w = ckpt["input_w"]
+            self._tracknet_h = ckpt["input_h"]
+        return model
+
+    def _tracknet_detect(self):
+        frames = list(self._frame_buf)
+        orig_h, orig_w = frames[-1].shape[:2]
+        tensors = []
+        for f in frames:
+            r = cv2.resize(f, (self._tracknet_w, self._tracknet_h))
+            t = torch.from_numpy(r).permute(2, 0, 1).float() / 255.0
+            tensors.append(t)
+        x = torch.cat(tensors, dim=0).unsqueeze(0).to(self.torch_device)
+        with torch.no_grad():
+            heatmap = self._tracknet(x)[0]
+        pt = heatmap_to_point(heatmap, threshold=TRACKNET_CONF_THR)
+        if pt is None:
+            return None
+        return (pt[0] / self._tracknet_w * orig_w,
+                pt[1] / self._tracknet_h * orig_h)
+
+    # ── YOLO ──────────────────────────────────────────────────────────────────
+
+    def _yolo_detect(self, frame: np.ndarray):
+        res = self._yolo(
+            frame, conf=YOLO_BALL_CONF, iou=0.3, imgsz=1280,
+            device=self.device_str, classes=[CLASS_BALL], verbose=False,
         )[0]
-        return self._best_box(result.boxes, offset=(0, 0))
-
-    # ── Strategy 2: SAHI 4-tile ───────────────────────────────────────────────
-
-    def _sahi_detect(
-        self, frame: np.ndarray
-    ) -> tuple[float, float] | None:
-        h, w = frame.shape[:2]
-        hw, hh = w // 2, h // 2
-        ov = w // 8     # 12.5% overlap prevents ball from falling on tile edge
-
-        tiles = [
-            (0,       0,       hw + ov, hh + ov),
-            (hw - ov, 0,       w,       hh + ov),
-            (0,       hh - ov, hw + ov, h      ),
-            (hw - ov, hh - ov, w,       h      ),
-        ]
-
-        candidates: list[tuple[float, float, float]] = []
-
-        for x1, y1, x2, y2 in tiles:
-            tile = frame[y1:y2, x1:x2]
-            result = self.model(
-                tile,
-                conf=self.ball_conf,
-                iou=0.3,
-                imgsz=640,
-                device=self.device,
-                classes=[CLASS_BALL],
-                verbose=False,
-            )[0]
-            pt = self._best_box(result.boxes, offset=(x1, y1), return_conf=True)
-            if pt:
-                candidates.append(pt)
-
-        if not candidates:
+        if res.boxes is None or len(res.boxes) == 0:
             return None
+        best = int(res.boxes.conf.argmax())
+        b    = res.boxes.xyxy[best].cpu().numpy()
+        return (float((b[0]+b[2])/2), float((b[1]+b[3])/2))
 
-        # Cluster-NMS: merge detections within 40px, keep highest conf
-        candidates.sort(key=lambda c: c[2], reverse=True)
-        kept = []
-        for cx, cy, conf in candidates:
-            if all(np.hypot(cx - kx, cy - ky) > 40 for kx, ky, _ in kept):
-                kept.append((cx, cy, conf))
+    # ── Optical flow ──────────────────────────────────────────────────────────
 
-        return (kept[0][0], kept[0][1]) if kept else None
-
-    # ── Strategy 3: Lucas-Kanade optical flow ────────────────────────────────
-
-# ── Strategy 3: Lucas-Kanade optical flow ────────────────────────────────
-
-    def _optical_flow(
-    self, gray: np.ndarray, frame: np.ndarray
-    ) -> tuple[float, float] | None:
-        if self._flow_point is None or self._prev_gray is None:
+    def _optical_flow(self, gray: np.ndarray, frame: np.ndarray):
+        if self._flow_pt is None or self._prev_gray is None:
             return None
-
-        next_pt, status, _ = cv2.calcOpticalFlowPyrLK(
-            self._prev_gray, gray,
-            self._flow_point, None,
-            **LK_PARAMS,
-        )
-
+        nxt, status, _ = cv2.calcOpticalFlowPyrLK(
+            self._prev_gray, gray, self._flow_pt, None, **LK_PARAMS)
         if status is None or status[0][0] == 0:
             return None
-
-        cx, cy = float(next_pt[0, 0, 0]), float(next_pt[0, 0, 1])
-
-        # Validate 1: Boundary check
-        h, w = gray.shape
+        cx, cy = float(nxt[0,0,0]), float(nxt[0,0,1])
+        h, w   = gray.shape
         if not (0 <= cx < w and 0 <= cy < h):
             return None
-
-        # Validate 2: Is the tracked point still orange? (basketball color check)
-        # Crop a small 10x10 window around the tracked point
         xi, yi = int(cx), int(cy)
-        window_size = 5  # Half-size
-        y1, y2 = max(0, yi - window_size), min(h, yi + window_size)
-        x1, x2 = max(0, xi - window_size), min(w, xi + window_size)
-        
-        patch = frame[y1:y2, x1:x2]
+        ws = 5
+        patch = frame[max(0,yi-ws):min(h,yi+ws), max(0,xi-ws):min(w,xi+ws)]
         if patch.size == 0:
             return None
-
-        # Convert patch to HSV and check for orange
-        hsv_patch = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-        orange_mask = cv2.inRange(hsv_patch, ORANGE_HSV_LOWER, ORANGE_HSV_UPPER)
-        
-        # If less than 5% of the patch is orange, reject the tracking point
-        orange_ratio = cv2.countNonZero(orange_mask) / (patch.shape[0] * patch.shape[1])
-        if orange_ratio < 0.05:
-            return None  # Tracker drifted onto something non-orange (e.g., a player)
-
-        self._flow_point = np.array([[[cx, cy]]], dtype=np.float32)
+        hsv   = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        mask  = cv2.inRange(hsv, ORANGE_HSV_LOWER, ORANGE_HSV_UPPER)
+        ratio = cv2.countNonZero(mask) / (patch.shape[0]*patch.shape[1])
+        if ratio < 0.05:
+            return None
+        self._flow_pt = np.array([[[cx, cy]]], dtype=np.float32)
         return (cx, cy)
-    
-    def _update_flow_seed(self, pos: tuple[float, float]) -> None:
-        """Seed the optical flow tracker at the confirmed ball position."""
-        self._flow_point = np.array([[[pos[0], pos[1]]]], dtype=np.float32)
 
-    # ── Kalman filter ─────────────────────────────────────────────────────────
+    def _update_flow_seed(self, pos):
+        self._flow_pt = np.array([[[pos[0], pos[1]]]], dtype=np.float32)
 
-    @staticmethod
-    def _build_kalman() -> cv2.KalmanFilter:
-        """
-        4-state Kalman: [cx, cy, vx, vy]
-        Constant-velocity model with measurement = [cx, cy].
+    # ── Kalman ────────────────────────────────────────────────────────────────
 
-        Tuned for basketball:
-          - High process noise (Q) because ball changes direction abruptly
-          - Low measurement noise (R) because YOLO detections are fairly precise
-        """
-        kf = cv2.KalmanFilter(4, 2)
-
-        # Transition: cx += vx, cy += vy each frame
-        kf.transitionMatrix = np.array([
-            [1, 0, 1, 0],
-            [0, 1, 0, 1],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1],
-        ], dtype=np.float32)
-
-        # We measure cx and cy directly
-        kf.measurementMatrix = np.array([
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-        ], dtype=np.float32)
-
-        # Process noise — HIGH because ball accelerates fast
-        kf.processNoiseCov = np.eye(4, dtype=np.float32) * 25.0
-
-        # Measurement noise — moderate: YOLO box center jitters ±3px
-        kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 9.0
-
-        # Initial uncertainty
-        kf.errorCovPost = np.eye(4, dtype=np.float32) * 100.0
-
-        return kf
-
-    def _kalman_correct(
-        self, pos: tuple[float, float]
-    ) -> tuple[float, float]:
-        """Feed a real measurement into the Kalman filter and return smoothed pos."""
-        measurement = np.array([[pos[0]], [pos[1]]], dtype=np.float32)
-
+    def _kalman_correct(self, pos):
+        m = np.array([[pos[0]], [pos[1]]], dtype=np.float32)
         if not self._kf_initialized:
-            # Initialise state with first detection
-            self.kf.statePre  = np.array([[pos[0]], [pos[1]], [0.], [0.]], dtype=np.float32)
-            self.kf.statePost = np.array([[pos[0]], [pos[1]], [0.], [0.]], dtype=np.float32)
+            self._kf.statePre  = np.array([[pos[0]],[pos[1]],[0.],[0.]], dtype=np.float32)
+            self._kf.statePost = np.array([[pos[0]],[pos[1]],[0.],[0.]], dtype=np.float32)
             self._kf_initialized = True
             return pos
+        self._kf.predict()
+        c = self._kf.correct(m)
+        return (float(c[0]), float(c[1]))
 
-        self.kf.predict()
-        corrected = self.kf.correct(measurement)
-        return (float(corrected[0][0]), float(corrected[1][0]))
-
-    def _kalman_predict_only(self) -> tuple[float, float] | None:
-        """Predict next position without a measurement (pure physics)."""
+    def _kalman_predict_only(self):
         if not self._kf_initialized:
             return None
-        predicted = self.kf.predict()
-        cx, cy = float(predicted[0][0]), float(predicted[1][0])
+        p = self._kf.predict()
+        cx, cy = float(p[0]), float(p[1])
+        return (cx, cy) if (0 <= cx < 5000 and 0 <= cy < 5000) else None
 
-        # Sanity: if prediction wanders off-screen or explodes, return None
-        if not (0 <= cx < 4000 and 0 <= cy < 4000):
-            return None
-        return (cx, cy)
-
-    def _kalman_gate(
-        self, pos: tuple[float, float]
-    ) -> bool:
-        """
-        Reject detections too far from the Kalman prediction.
-        This eliminates false positives (orange ads, sponsor logos)
-        that YOLO picks up at conf=0.07.
-        """
+    def _kalman_gate(self, pos) -> bool:
         if not self._kf_initialized:
-            return True     # accept anything during warmup
-
+            return True
         pred = self._kalman_predict_only()
         if pred is None:
             return True
+        return np.hypot(pos[0]-pred[0], pos[1]-pred[1]) <= KALMAN_GATE_PX
 
-        dist = np.hypot(pos[0] - pred[0], pos[1] - pred[1])
-        return dist <= MAX_KALMAN_GATE_PX
-
-    # ── Gap interpolation ─────────────────────────────────────────────────────
+    # ── Interpolation ─────────────────────────────────────────────────────────
 
     def _interpolate_back(self, curr_fidx: int) -> None:
-        """
-        Linear interpolation between the last real detection and current frame
-        for any un-filled gap ≤ MAX_INTERP_GAP frames.
-        Kalman frames are NOT overwritten — only truly-empty frames.
-        """
-        if not self._detections:
+        if len(self._detections) < 2:
             return
-
-        real_fidxs = sorted(self._detections.keys())
-        if len(real_fidxs) < 2:
-            return
-
-        for i in range(len(real_fidxs) - 1):
-            f1, f2 = real_fidxs[i], real_fidxs[i + 1]
-            gap = f2 - f1 - 1
+        fidxs = sorted(self._detections.keys())
+        for i in range(len(fidxs)-1):
+            f1, f2 = fidxs[i], fidxs[i+1]
+            gap    = f2 - f1 - 1
             if gap <= 0 or gap > MAX_INTERP_GAP:
                 continue
-
-            p1 = self._detections[f1]
-            p2 = self._detections[f2]
-
-            for k, fidx in enumerate(range(f1 + 1, f2), start=1):
+            p1, p2 = self._detections[f1], self._detections[f2]
+            for k, fidx in enumerate(range(f1+1, f2), start=1):
                 if fidx in self._detections:
-                    continue   # already has a real detection
-                # Overwrite kalman with smoother interpolation
-                t = k / (gap + 1)
-                ix = p1[0] + t * (p2[0] - p1[0])
-                iy = p1[1] + t * (p2[1] - p1[1])
-                self._positions[fidx] = (ix, iy)
-                self._source_log[fidx] = "interp"
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _best_box(
-        boxes,
-        offset: tuple[int, int] = (0, 0),
-        return_conf: bool = False,
-    ):
-        """Return (cx, cy) or (cx, cy, conf) of the highest-confidence box."""
-        if boxes is None or len(boxes) == 0:
-            return None
-
-        best_idx  = int(boxes.conf.argmax())
-        xyxy      = boxes.xyxy[best_idx].cpu().numpy()
-        conf      = float(boxes.conf[best_idx].cpu())
-        cx = float((xyxy[0] + xyxy[2]) / 2) + offset[0]
-        cy = float((xyxy[1] + xyxy[3]) / 2) + offset[1]
-
-        return (cx, cy, conf) if return_conf else (cx, cy)
+                    continue
+                t = k / (gap+1)
+                self._positions[fidx] = (p1[0]+t*(p2[0]-p1[0]), p1[1]+t*(p2[1]-p1[1]))
+                self._sources[fidx]   = "interp"
 
     # ── Drawing ───────────────────────────────────────────────────────────────
 
-    def draw(
-        self,
-        frame: np.ndarray,
-        frame_idx: int,
-        trail_len: int = 25,
-    ) -> np.ndarray:
-        """Draw ball + motion trail + source label on a copy of frame."""
-        vis = frame.copy()
-
-        # Trail — fading orange dots
+    def draw(self, frame: np.ndarray, frame_idx: int, trail_len: int = 25) -> np.ndarray:
+        vis   = frame.copy()
         trail = self.get_trail(trail_len)
         for i, (cx, cy) in enumerate(trail):
-            alpha  = (i + 1) / len(trail)
-            radius = max(2, int(6 * alpha))
-            color  = (0, int(140 * alpha), int(255 * alpha))
-            cv2.circle(vis, (int(cx), int(cy)), radius, color, -1)
-
-        # Current position
+            a = (i+1) / max(len(trail), 1)
+            cv2.circle(vis, (int(cx), int(cy)), max(2, int(6*a)),
+                       (0, int(140*a), int(255*a)), -1)
         pos = self.get_position(frame_idx)
         if pos is not None:
-            cx, cy   = int(pos[0]), int(pos[1])
-            source   = self.get_source(frame_idx)
-            is_real  = source in ("yolo", "yolo_tile", "flow")
-
-            ring_color = (0, 165, 255) if is_real else (0, 200, 80)
-            cv2.circle(vis, (cx, cy), 14, ring_color, 2)
-            cv2.circle(vis, (cx, cy),  4, ring_color, -1)
-
-            labels = {
-                "yolo":      "Ball (YOLO)",
-                "yolo_tile": "Ball (tile)",
-                "flow":      "Ball (flow)",
-                "kalman":    "Ball (pred)",
-                "interp":    "Ball (interp)",
-            }
-            cv2.putText(
-                vis, labels.get(source, "Ball"),
-                (cx + 16, cy + 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, ring_color, 2, cv2.LINE_AA,
-            )
-
+            cx, cy  = int(pos[0]), int(pos[1])
+            src     = self.get_source(frame_idx)
+            is_real = src in ("tracknet", "yolo", "flow")
+            color   = (0, 165, 255) if is_real else (0, 200, 80)
+            labels  = {"tracknet":"Ball (TrackNet)","yolo":"Ball (YOLO)",
+                       "flow":"Ball (flow)","kalman":"Ball (pred)","interp":"Ball (interp)"}
+            cv2.circle(vis, (cx, cy), 14, color, 2)
+            cv2.circle(vis, (cx, cy),  4, color, -1)
+            cv2.putText(vis, labels.get(src,"Ball"),
+                        (cx+16, cy+5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         return vis
 
     def reset(self) -> None:
-        self.kf              = self._build_kalman()
-        self._kf_initialized = False
-        self._positions.clear()
-        self._detections.clear()
-        self._source_log.clear()
-        self._trail.clear()
-        self._prev_gray      = None
-        self._flow_point     = None
-        self._flow_miss_count = 0
-        self._last_fidx      = -1
+        self._kf = _build_kalman(); self._kf_initialized = False
+        self._frame_buf.clear(); self._positions.clear()
+        self._detections.clear(); self._sources.clear()
+        self._trail.clear(); self._prev_gray = None
+        self._flow_pt = None; self._flow_miss_count = 0; self._last_fidx = -1
 
     def __repr__(self) -> str:
-        real = sum(1 for s in self._source_log.values() if s in ("yolo","yolo_tile","flow"))
-        pred = sum(1 for s in self._source_log.values() if s == "kalman")
-        intp = sum(1 for s in self._source_log.values() if s == "interp")
-        return (
-            f"BallTracker(real={real}, kalman_pred={pred}, interp={intp}, "
-            f"total={len(self._positions)})"
-        )
+        r = sum(1 for s in self._sources.values() if s in ("tracknet","yolo","flow"))
+        return (f"BallTracker(tracknet={'ok' if self._tracknet else 'MISSING'},"
+                f" real={r}, total={len(self._positions)})")
+
+
+# ── Module helpers ────────────────────────────────────────────────────────────
+
+def _exists(path: str) -> bool:
+    import os; return bool(path and os.path.exists(path))
+
+def _build_kalman() -> cv2.KalmanFilter:
+    kf = cv2.KalmanFilter(4, 2)
+    kf.transitionMatrix    = np.array([[1,0,1,0],[0,1,0,1],[0,0,1,0],[0,0,0,1]], dtype=np.float32)
+    kf.measurementMatrix   = np.array([[1,0,0,0],[0,1,0,0]], dtype=np.float32)
+    kf.processNoiseCov     = np.eye(4, dtype=np.float32) * 25.0
+    kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 9.0
+    kf.errorCovPost        = np.eye(4, dtype=np.float32) * 100.0
+    return kf

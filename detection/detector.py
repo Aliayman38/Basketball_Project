@@ -1,7 +1,7 @@
 """
 src/detection/detector.py
 ──────────────────────────
-YOLOv11 detection wrapper — aligned to the Roboflow basketball-players v11
+RT-DETR detection wrapper — aligned to the Roboflow basketball-players v11
 dataset with 6 classes.
 
 Dataset class map  (data/basketball.yaml)
@@ -12,20 +12,12 @@ Dataset class map  (data/basketball.yaml)
   3 → Overlay
   4 → Player
   5 → Ref
-
-Class IDs are imported from TeamClusterer so both modules always agree —
-there is a single source of truth.
-
-  from src.team_clustering.clusterer import (
-      CLASS_BALL, CLASS_CLOCK, CLASS_HOOP, CLASS_OVERLAY,
-      CLASS_PLAYER, CLASS_REF,
-  )
 """
 
 from __future__ import annotations
 
 import numpy as np
-from ultralytics import YOLO
+from ultralytics import RTDETR
 
 # ── Single source of truth for class IDs ─────────────────────────────────────
 from team_clustering.clusterer import (
@@ -58,33 +50,23 @@ CLASSES_OF_INTEREST = {CLASS_BALL, CLASS_PLAYER, CLASS_REF, CLASS_HOOP, CLASS_OV
 # ─────────────────────────────────────────────────────────────────────────────
 class BasketballDetector:
     """
-    Thin wrapper around a YOLOv11 model for basketball detection.
-
-    Handles:
-      - Loading base or fine-tuned weights
-      - Running inference on BGR frames (cv2 format)
-      - Parsing results into structured detection dicts
-      - Filtering by class type (players, ball, referees)
-      - Drawing annotated bounding boxes onto a frame (for debug video)
+    Thin wrapper around an RT-DETR model for basketball detection.
 
     Parameters
     ----------
-    model_path : str
-        Path to .pt weights.
-        Use 'yolo11n.pt' during development (downloads automatically).
-        After fine-tuning: 'runs/train/basketball/weights/best.pt'.
-    conf       : float   Detection confidence threshold.
-    iou        : float   NMS IoU threshold.
-    imgsz      : int     Inference resolution.  1280 catches the small ball.
-    device     : str     '0' for first GPU, 'cpu' for CPU-only.
+    model_path : str   Path to RT-DETR .pt weights.
+    conf       : float Detection confidence threshold.
+    iou        : float NMS IoU threshold.
+    imgsz      : int   Inference resolution (RT-DETR native = 640).
+    device     : str   '0' for first GPU, 'cpu' for CPU-only.
     """
 
     def __init__(
         self,
-        model_path: str   = "yolo11n.pt",
+        model_path: str   = "models/RT-DETR/RT-DETR.pt",
         conf:       float = 0.30,
         iou:        float = 0.45,
-        imgsz:      int   = 1280,
+        imgsz:      int   = 640,
         device:     str   = "0",
     ) -> None:
         self.model_path = model_path
@@ -93,8 +75,8 @@ class BasketballDetector:
         self.imgsz      = imgsz
         self.device     = device
 
-        print(f"[Detector] Loading weights: {model_path}")
-        self.model = YOLO(model_path)
+        print(f"[Detector] Loading RT-DETR weights: {model_path}")
+        self.model = RTDETR(model_path)
         print(f"[Detector] Ready — conf={conf}  iou={iou}  imgsz={imgsz}")
 
     # ── Inference ─────────────────────────────────────────────────────────────

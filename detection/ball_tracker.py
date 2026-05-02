@@ -1,19 +1,19 @@
 """
 src/detection/ball_tracker.py  (v3 — TrackNet primary)
 ────────────────────────────────────────────────────────
-Ball tracking: TrackNet primary → YOLO fallback → Optical flow → Kalman → Interpolation
+Ball tracking: TrackNet primary → RT-DETR fallback → Optical flow → Kalman → Interpolation
 """
 from __future__ import annotations
 import cv2
 import numpy as np
 import torch
 from collections import deque
-from ultralytics import YOLO
-from src.detection.tracknet import TrackNet, heatmap_to_point
+from ultralytics import RTDETR
+from detection.tracknet import TrackNet, heatmap_to_point
 
 CLASS_BALL           = 0
 TRACKNET_CONF_THR    = 0.50
-YOLO_BALL_CONF       = 0.07
+RTDETR_BALL_CONF     = 0.07
 KALMAN_GATE_PX       = 150
 MAX_INTERP_GAP       = 20
 TRACKNET_W           = 640
@@ -31,7 +31,7 @@ class BallTracker:
     """
     5-layer ball tracker:
     1. TrackNet  — spatiotemporal heatmap (3 frames stacked)
-    2. YOLO      — single-frame fallback  (conf=0.07)
+    2. RT-DETR  — single-frame fallback  (conf=0.07)
     3. Opt. flow — Lucas-Kanade + orange HSV validation
     4. Kalman    — constant-velocity prediction
     5. Interp    — linear gap fill ≤ 20 frames
@@ -40,7 +40,7 @@ class BallTracker:
     def __init__(
         self,
         tracknet_path: str       = "weights/tracknet_best.pt",
-        yolo_path:     str       = "best.pt",
+        rtdetr_path:   str       = "models/RT-DETR/RT-DETR.pt",
         device:        str | int = "0",
         use_flow:      bool      = True,
     ) -> None:
@@ -61,12 +61,11 @@ class BallTracker:
             print(f"[BallTracker] TrackNet ready on {self.torch_device}")
         else:
             print(f"[BallTracker] WARNING: no TrackNet weights at '{tracknet_path}'")
-            print(f"[BallTracker] Run: python scripts/train_tracknet.py --video game.mp4")
-            print(f"[BallTracker] Falling back to YOLO-only mode.")
+            print(f"[BallTracker] Falling back to RT-DETR-only mode.")
 
-        # YOLO fallback
-        print(f"[BallTracker] Loading YOLO <- {yolo_path}")
-        self._yolo = YOLO(yolo_path)
+        # RT-DETR fallback
+        print(f"[BallTracker] Loading RT-DETR <- {rtdetr_path}")
+        self._rtdetr = RTDETR(rtdetr_path)
 
         # Kalman
         self._kf             = _build_kalman()
@@ -104,11 +103,11 @@ class BallTracker:
             if tp and self._kalman_gate(tp):
                 pos, source = tp, "tracknet"
 
-        # Layer 2 — YOLO
+        # Layer 2 — RT-DETR
         if pos is None:
-            yp = self._yolo_detect(frame)
+            yp = self._rtdetr_detect(frame)
             if yp and self._kalman_gate(yp):
-                pos, source = yp, "yolo"
+                pos, source = yp, "rtdetr"
 
         # Layer 3 — Optical flow
         if pos is None and self.use_flow and self._prev_gray is not None:
@@ -183,11 +182,11 @@ class BallTracker:
         return (pt[0] / self._tracknet_w * orig_w,
                 pt[1] / self._tracknet_h * orig_h)
 
-    # ── YOLO ──────────────────────────────────────────────────────────────────
+    # ── RT-DETR ───────────────────────────────────────────────────────────────────
 
-    def _yolo_detect(self, frame: np.ndarray):
-        res = self._yolo(
-            frame, conf=YOLO_BALL_CONF, iou=0.3, imgsz=1280,
+    def _rtdetr_detect(self, frame: np.ndarray):
+        res = self._rtdetr(
+            frame, conf=RTDETR_BALL_CONF, iou=0.3, imgsz=640,
             device=self.device_str, classes=[CLASS_BALL], verbose=False,
         )[0]
         if res.boxes is None or len(res.boxes) == 0:
@@ -236,13 +235,13 @@ class BallTracker:
             return pos
         self._kf.predict()
         c = self._kf.correct(m)
-        return (float(c[0]), float(c[1]))
+        return (float(c[0][0]), float(c[1][0]))
 
     def _kalman_predict_only(self):
         if not self._kf_initialized:
             return None
         p = self._kf.predict()
-        cx, cy = float(p[0]), float(p[1])
+        cx, cy = float(p[0][0]), float(p[1][0])
         return (cx, cy) if (0 <= cx < 5000 and 0 <= cy < 5000) else None
 
     def _kalman_gate(self, pos) -> bool:
@@ -285,9 +284,9 @@ class BallTracker:
         if pos is not None:
             cx, cy  = int(pos[0]), int(pos[1])
             src     = self.get_source(frame_idx)
-            is_real = src in ("tracknet", "yolo", "flow")
+            is_real = src in ("tracknet", "rtdetr", "flow")
             color   = (0, 165, 255) if is_real else (0, 200, 80)
-            labels  = {"tracknet":"Ball (TrackNet)","yolo":"Ball (YOLO)",
+            labels  = {"tracknet":"Ball (TrackNet)","rtdetr":"Ball (RT-DETR)",
                        "flow":"Ball (flow)","kalman":"Ball (pred)","interp":"Ball (interp)"}
             cv2.circle(vis, (cx, cy), 14, color, 2)
             cv2.circle(vis, (cx, cy),  4, color, -1)
@@ -303,7 +302,7 @@ class BallTracker:
         self._flow_pt = None; self._flow_miss_count = 0; self._last_fidx = -1
 
     def __repr__(self) -> str:
-        r = sum(1 for s in self._sources.values() if s in ("tracknet","yolo","flow"))
+        r = sum(1 for s in self._sources.values() if s in ("tracknet","rtdetr","flow"))
         return (f"BallTracker(tracknet={'ok' if self._tracknet else 'MISSING'},"
                 f" real={r}, total={len(self._positions)})")
 

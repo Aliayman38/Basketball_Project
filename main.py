@@ -64,7 +64,7 @@ except ImportError as _e:
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DEFAULT_MODEL  = "models/weights/best.pt"
+DEFAULT_MODEL  = "models/RT-DETR/RT-DETR.pt"
 DEFAULT_SAM2   = "models/sam2/sam2.1_hiera_small.pt"
 DEFAULT_VIDEO  = "data/test_3.mp4"
 DEFAULT_OUTPUT = "runs/detect/output.mp4"
@@ -72,7 +72,7 @@ DEFAULT_TRAJ   = "runs/detect/trajectories.json"
 
 CONF_THRESHOLD    = 0.30
 IOU_THRESHOLD     = 0.45
-IMGSZ             = 1280
+IMGSZ             = 640       # RT-DETR native resolution
 BALL_CONF         = 0.10
 
 SHOW_TRAILS       = True
@@ -266,7 +266,7 @@ def _draw_minimap(
 # ─────────────────────────────────────────────────────────────────────────────
 def run_pipeline(args):
     if not os.path.exists(args.model):
-        raise FileNotFoundError(f"YOLO weights not found: {args.model}")
+        raise FileNotFoundError(f"RT-DETR weights not found: {args.model}")
     if not os.path.exists(args.sam2):
         raise FileNotFoundError(
             f"SAM2 checkpoint not found: {args.sam2}\n"
@@ -280,7 +280,7 @@ def run_pipeline(args):
     print("  BASKETBALL ANALYTICS — SAM2 PIPELINE (Chunked)")
     print("═" * 60)
 
-    yolo_device = "0" if args.device == "cuda" else args.device
+    rtdetr_device = "0" if args.device == "cuda" else args.device
 
     # ── 1. Load video ─────────────────────────────────────────────────────────
     frames, fps, width, height = load_video(args.video)
@@ -320,12 +320,12 @@ def run_pipeline(args):
         minimap_w = minimap_h = 0
 
     # ══════════════════════════════════════════════════════════════════════════
-    # PHASE 1 — YOLO detects all anchor frames then is deleted from GPU
+    # PHASE 1 — RT-DETR detects all anchor frames then is deleted from GPU
     # ══════════════════════════════════════════════════════════════════════════
-    print("\n[Phase 1] YOLO detecting…")
+    print("\n[Phase 1] RT-DETR detecting…")
     detector = BasketballDetector(
         model_path=args.model, conf=CONF_THRESHOLD,
-        iou=IOU_THRESHOLD, imgsz=IMGSZ, device=yolo_device,
+        iou=IOU_THRESHOLD, imgsz=IMGSZ, device=rtdetr_device,
     )
     detector.warmup()
 
@@ -343,7 +343,7 @@ def run_pipeline(args):
 
     del detector
     free_memory()
-    print("[Phase 1] YOLO removed from GPU\n")
+    print("[Phase 1] RT-DETR removed from GPU\n")
 
     # ══════════════════════════════════════════════════════════════════════════
     # PHASE 2 — SAM2 chunked tracking
@@ -377,8 +377,8 @@ def run_pipeline(args):
     # ══════════════════════════════════════════════════════════════════════════
     print("[Phase 3] Writing output video…")
     ball_tracker = BallTracker(
-        model_path=args.model, ball_conf=BALL_CONF,
-        imgsz=IMGSZ, use_tiling=not args.no_tiling, device=yolo_device,
+        rtdetr_path = args.model,
+        device      = rtdetr_device,
     )
     clusterer    = TeamClusterer(warm_up_frames=60)
     interpolator = TrajectoryInterpolator(max_gap=15, use_parabolic=True)

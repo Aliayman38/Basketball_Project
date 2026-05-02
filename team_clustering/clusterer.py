@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
-from collections import defaultdict
+from collections import defaultdict, Counter, Counter
 from sklearn.cluster import KMeans
 
 # ── Class IDs ─────────────────────────────────────────────────────────────────
@@ -125,6 +125,12 @@ class TeamClusterer:
         # Maps raw K-Means label (0 or 1) → TEAM_A / TEAM_B.
         # Set by _fit() based on mean hue — stable across refine() calls.
         self._label_map: dict[int, int] = {0: TEAM_A, 1: TEAM_B}
+        self._user_locked: bool = False   # True once user picks teams in GUI
+
+        # Majority voting — only lock after consistent predictions
+        self._vote_counts: dict[int, Counter] = defaultdict(Counter)
+        self.vote_threshold  = 10    # observations before locking
+        self.vote_confidence = 0.70  # fraction required to agree
 
         self.is_fitted: bool = False
         self._frame_idx: int = 0
@@ -160,8 +166,12 @@ class TeamClusterer:
 
         self._frame_idx += 1
 
-        # BUG FIX: was `== warm_up_frames` (single shot); now `>=` so we
-        # keep retrying every frame until there is actually enough data.
+        # Skip auto-clustering if user already calibrated via GUI
+        if self._user_locked:
+            if self.is_fitted:
+                self._assign_pending()
+            return
+
         if self._frame_idx >= self.warm_up_frames and not self.is_fitted:
             self._fit()
 
@@ -187,10 +197,213 @@ class TeamClusterer:
         """
         Re-cluster using all accumulated histograms.
         The hue anchor guarantees Team A / Team B labels stay consistent.
+        Only runs if label map has NOT been manually set by the user.
         """
-        self._fit(label="REFINE")
+        if not self._user_locked:
+            self._fit(label="REFINE")
+
+    def calibrate_from_frame(
+        self,
+        frame: np.ndarray,
+        detections: list[dict],
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+        """
+        One-shot calibration on a single frame using k=3 clustering.
+
+        Uses SigLIP embeddings (768-dim) when available — they capture jersey
+        texture and pattern, not just colour.  Falls back to HSV histograms
+        if transformers is not installed.
+
+        Clusters into 3 groups: Team A, Team B, and Referees.  The referee
+        cluster is identified automatically as the group with the lowest mean
+        HSV saturation (refs wear black/white stripes → achromatic).  The
+        remaining two player clusters are returned for the user to label.
+
+        Returns
+        -------
+        (group0_crops, group1_crops)  — the two PLAYER groups.
+        Call set_user_label_map(team_a_is_group0=True/False) afterwards.
+        """
+        player_dets = [d for d in detections
+                       if d.get("class_id") == CLASS_PLAYER
+                       and d.get("track_id", -1) != -1]
+        if len(player_dets) < 2:
+            return [], []
+
+        crops, tids = [], []
+        for det in player_dets:
+            crop = self._extract_crop(frame, det["bbox"])
+            crops.append(crop)
+            tids.append(det.get("track_id", -1))
+
+        # Feature extraction — try SigLIP first, fall back to HSV
+        feats = self._extract_siglip_features(crops)
+        if feats is None:
+            feats_list, valid_crops, valid_tids = [], [], []
+            for det, crop, tid in zip(player_dets, crops, tids):
+                h = self._extract_histogram(frame, det["bbox"])
+                if h is not None:
+                    feats_list.append(h)
+                    valid_crops.append(crop)
+                    valid_tids.append(tid)
+            if len(feats_list) < 2:
+                return [], []
+            feats      = np.array(feats_list, dtype=np.float32)
+            crops      = valid_crops
+            tids       = valid_tids
+
+        # k=3: two teams + referee cluster
+        k = min(3, len(feats))
+        km = KMeans(n_clusters=k, random_state=42, n_init=15)
+        raw_labels = km.fit_predict(feats)
+
+        if k == 3:
+            # Identify referee cluster by lowest mean saturation
+            # (black+white stripes = least chromatic)
+            sat_means = []
+            for ci in range(3):
+                cluster_crops = [crops[j] for j in range(len(crops))
+                                 if raw_labels[j] == ci]
+                sat_means.append(self._mean_saturation(cluster_crops))
+
+            ref_cluster    = int(np.argmin(sat_means))
+            player_clusters = [i for i in range(3) if i != ref_cluster]
+
+            # Store mapping: raw cluster id → player group index (0 or 1)
+            self._player_cluster_map = {
+                player_clusters[0]: 0,
+                player_clusters[1]: 1,
+                ref_cluster:        -1,   # referee
+            }
+        else:
+            self._player_cluster_map = {0: 0, 1: 1}
+
+        self._kmeans     = km
+        self._calib_raw  = raw_labels
+        self._calib_tids = tids
+
+        group0 = [crops[j] for j in range(len(crops))
+                  if self._player_cluster_map.get(raw_labels[j], -1) == 0]
+        group1 = [crops[j] for j in range(len(crops))
+                  if self._player_cluster_map.get(raw_labels[j], -1) == 1]
+
+        print(f"[TeamClusterer] Calibration — k={k}, "
+              f"group0: {len(group0)}, group1: {len(group1)}, "
+              f"refs/other: {len(crops)-len(group0)-len(group1)}")
+        return group0, group1
+
+    def _mean_saturation(self, crops: list[np.ndarray]) -> float:
+        """Mean HSV saturation across crops — referees score lowest."""
+        if not crops:
+            return 0.0
+        total, count = 0.0, 0
+        for crop in crops:
+            if crop.size == 0:
+                continue
+            hsv    = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+            total += float(hsv[:,:,1].mean())
+            count += 1
+        return total / max(count, 1)
+
+    def _extract_siglip_features(
+        self, crops: list[np.ndarray]
+    ) -> np.ndarray | None:
+        """
+        Extract SigLIP embeddings for a list of BGR crops.
+
+        Returns an (N, 768) float32 array, or None if transformers/SigLIP
+        is not available (caller falls back to HSV histograms).
+        """
+        try:
+            from transformers import SiglipImageProcessor, SiglipVisionModel
+            import torch
+            from PIL import Image as PILImage
+
+            if not hasattr(self, "_siglip_model"):
+                print("[TeamClusterer] Loading SigLIP for calibration (one-time)…")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model_id = "google/siglip-base-patch16-224"
+                self._siglip_proc  = SiglipImageProcessor.from_pretrained(model_id)
+                self._siglip_model = SiglipVisionModel.from_pretrained(model_id).to(device)
+                self._siglip_model.eval()
+                self._siglip_device = device
+
+            embeddings = []
+            for crop in crops:
+                if crop.size == 0:
+                    embeddings.append(np.zeros(768, dtype=np.float32))
+                    continue
+                rgb  = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                pil  = PILImage.fromarray(rgb)
+                inp  = self._siglip_proc(images=pil, return_tensors="pt").to(
+                           self._siglip_device)
+                with torch.no_grad():
+                    out = self._siglip_model(**inp)
+                emb = out.pooler_output.squeeze().cpu().numpy().astype(np.float32)
+                embeddings.append(emb)
+
+            return np.array(embeddings, dtype=np.float32)
+
+        except Exception as e:
+            print(f"[TeamClusterer] SigLIP unavailable ({e}), using HSV fallback")
+            return None
+
+    def set_user_label_map(self, team_a_is_group0: bool) -> None:
+        """
+        Lock the label map based on the user's GUI selection.
+        Handles both k=2 and k=3 calibration (referee cluster auto-excluded).
+
+        team_a_is_group0=True  → group 0 is Team A, group 1 is Team B
+        team_a_is_group0=False → group 1 is Team A, group 0 is Team B
+        """
+        pcm = getattr(self, "_player_cluster_map", None)
+
+        if pcm is not None:
+            # k=3 path: build label_map from player_cluster_map
+            self._label_map = {}
+            for raw_cluster, group_idx in pcm.items():
+                if group_idx == -1:
+                    self._label_map[raw_cluster] = TEAM_REF
+                elif group_idx == 0:
+                    self._label_map[raw_cluster] = TEAM_A if team_a_is_group0 else TEAM_B
+                else:
+                    self._label_map[raw_cluster] = TEAM_B if team_a_is_group0 else TEAM_A
+        else:
+            # k=2 fallback
+            if team_a_is_group0:
+                self._label_map = {0: TEAM_A, 1: TEAM_B}
+            else:
+                self._label_map = {0: TEAM_B, 1: TEAM_A}
+
+        self._user_locked = True
+        self.is_fitted    = True
+
+        # Pre-assign calibrated tracks (skip refs)
+        if hasattr(self, "_calib_raw") and hasattr(self, "_calib_tids"):
+            for tid, raw in zip(self._calib_tids, self._calib_raw):
+                team = self._label_map.get(int(raw))
+                if team is not None and team != TEAM_REF:
+                    self._team_labels[tid] = team
+
+        print(f"[TeamClusterer] User locked — "
+              f"group0={'Team A' if team_a_is_group0 else 'Team B'}, "
+              f"group1={'Team B' if team_a_is_group0 else 'Team A'}")
 
     # ── Private ────────────────────────────────────────────────────────────────
+
+    def _extract_crop(self, frame: np.ndarray, bbox: np.ndarray) -> np.ndarray:
+        """Return the torso crop (BGR) used for display in the GUI."""
+        x1 = max(0, int(bbox[0])); y1 = max(0, int(bbox[1]))
+        x2 = min(frame.shape[1] - 1, int(bbox[2]))
+        y2 = min(frame.shape[0] - 1, int(bbox[3]))
+        crop  = frame[y1:y2, x1:x2]
+        h_box = crop.shape[0]
+        t_top = int(h_box * self.torso_ratio[0])
+        t_bot = int(h_box * self.torso_ratio[1])
+        torso = crop[t_top:t_bot, :]
+        if torso.size == 0:
+            return crop
+        return torso
 
     def _extract_histogram(
         self, frame: np.ndarray, bbox: np.ndarray
@@ -326,8 +539,11 @@ class TeamClusterer:
 
     def _assign_pending(self) -> None:
         """
-        Assign any track that appeared after the initial fit.
-        Uses KMeans.predict() directly on the 48-dim feature — no UMAP.
+        Assign team labels using majority voting across observations.
+
+        Each call casts one vote from the latest histogram.  A team is only
+        locked once vote_threshold votes cast AND vote_confidence fraction agree.
+        This makes assignments robust to single motion-blurred frames.
         """
         if self._kmeans is None:
             return
@@ -335,12 +551,24 @@ class TeamClusterer:
         for tid, obs in self._hist_buffer.items():
             if tid in self._team_labels:
                 continue
-            if len(obs) < self.min_obs:
+            if not obs:
                 continue
 
-            feat      = np.mean(obs, axis=0).reshape(1, -1).astype(np.float32)
-            raw_label = int(self._kmeans.predict(feat)[0])
-            self._team_labels[tid] = self._label_map[raw_label]
+            latest    = obs[-1].reshape(1, -1).astype(np.float32)
+            raw_label = int(self._kmeans.predict(latest)[0])
+            team      = self._label_map.get(raw_label)
+            if team is None:
+                continue
+
+            self._vote_counts[tid][team] += 1
+
+            total = sum(self._vote_counts[tid].values())
+            if total < self.vote_threshold:
+                continue
+
+            winner, winner_count = self._vote_counts[tid].most_common(1)[0]
+            if winner_count / total >= self.vote_confidence:
+                self._team_labels[tid] = winner
 
     def __repr__(self) -> str:
         return (

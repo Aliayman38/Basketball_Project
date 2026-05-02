@@ -82,8 +82,7 @@ SHOW_MASKS        = True
 MASK_ALPHA        = 0.55
 
 CHUNK_SIZE        = 60
-CHUNK_OVERLAP     = 10
-REPROMPT_INTERVAL = 30
+CHUNK_OVERLAP     = 20
 GPU_SCALE         = 0.5
 
 # Mini-court overlay size (fraction of video width)
@@ -117,8 +116,8 @@ def parse_args():
              "Enables m/s and metre columns in the CSV reports.",
     )
     p.add_argument(
-        "--no-analytics", action="store_true",
-        help="Skip all analytics (distance, speed, heatmap).",
+        "--team-a-cluster", type=int, default=None, choices=[0, 1],
+        help="Which K-Means cluster is Team A (0 or 1). Set by the GUI calibration step.",
     )
     return p.parse_args()
 
@@ -334,12 +333,15 @@ def run_pipeline(args):
     n_r = sum(1 for d in frame0_dets if d["class_id"] == CLASS_REF)
     print(f"[Phase 1] Frame 0: {n_p} players, {n_r} refs")
 
+    # Anchor detection for lost-track recovery only.
+    # We sample every 60 frames (not 30) — fewer prompts = less memory disruption.
+    RECOVERY_INTERVAL = 60
     anchor_dets: dict[int, list[dict]] = {}
-    for fi in range(REPROMPT_INTERVAL, total_frames, REPROMPT_INTERVAL):
+    for fi in range(RECOVERY_INTERVAL, total_frames, RECOVERY_INTERVAL):
         dets = detector.parse(detector.detect(frames[fi]))
         anchor_dets[fi] = [d for d in dets
                            if d["class_id"] in (CLASS_PLAYER, CLASS_REF)]
-    print(f"[Phase 1] Pre-detected {len(anchor_dets)} anchor frames")
+    print(f"[Phase 1] Pre-detected {len(anchor_dets)} recovery anchor frames")
 
     del detector
     free_memory()
@@ -354,7 +356,6 @@ def run_pipeline(args):
         device            = args.device,
         chunk_size        = args.chunk_size,
         chunk_overlap     = CHUNK_OVERLAP,
-        reprompt_interval = REPROMPT_INTERVAL,
         gpu_scale         = GPU_SCALE,
     )
 
@@ -381,6 +382,12 @@ def run_pipeline(args):
         device      = rtdetr_device,
     )
     clusterer    = TeamClusterer(warm_up_frames=60)
+
+    # If the user calibrated teams in the GUI, lock the label map immediately
+    if getattr(args, "team_a_cluster", None) is not None:
+        clusterer.set_user_label_map(team_a_is_group0=(args.team_a_cluster == 0))
+        print(f"[Main] Team assignment locked — "
+              f"cluster {args.team_a_cluster} = Team A")
     interpolator = TrajectoryInterpolator(max_gap=15, use_parabolic=True)
     writer       = make_writer(args.output, fps, width, height)
     trajectories: dict[int, list[tuple]] = defaultdict(list)

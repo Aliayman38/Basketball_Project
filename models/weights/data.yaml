@@ -1,0 +1,12 @@
+names:
+- player
+nc: 1
+roboflow:
+  license: CC BY 4.0
+  project: basketball-players-qyccm
+  url: https://universe.roboflow.com/ai-tester-pysjx/basketball-players-qyccm/dataset/2
+  version: 2
+  workspace: ai-tester-pysjx
+test: ../test/images
+train: ../train/images
+val: ../valid/images

@@ -1,144 +1,75 @@
-"""
-src/team_clustering/team_assigner.py
-──────────────────────────────────────
-CLIP-based team assignment — classifies players by jersey appearance
-using the patrickjohncyh/fashion-clip vision-language model.
+import numpy as np
+from team_clustering.clusterer import Clusterer
 
-Original class is unchanged.
-read_stub / save_stub are inlined here to avoid a naming conflict with
-the 'utils' package that may be installed in the active virtual environment.
-"""
-
-from __future__ import annotations
-
-import os
-import pickle
-
-from PIL import Image
-import cv2
-from transformers import CLIPProcessor, CLIPModel
-
-
-# ── Inlined stub helpers (originally from utils.py) ──────────────────────────
-
-def read_stub(read_from_stub: bool, stub_path: str | None):
-    if read_from_stub and stub_path and os.path.exists(stub_path):
-        with open(stub_path, "rb") as f:
-            return pickle.load(f)
-    return None
-
-
-def save_stub(stub_path: str | None, data) -> None:
-    if not stub_path:
-        return
-    parent = os.path.dirname(stub_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(stub_path, "wb") as f:
-        pickle.dump(data, f)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 
 class TeamAssigner:
     """
-    A class that assigns players to teams based on their jersey colors using visual analysis.
-
-    The class uses a pre-trained vision model to classify players into teams based on their
-    appearance. It maintains a consistent team assignment for each player across frames.
-
-    Attributes:
-        team_colors (dict): Dictionary storing team color information.
-        player_team_dict (dict): Dictionary mapping player IDs to their team assignments.
-        team_1_class_name (str): Description of Team 1's jersey appearance.
-        team_2_class_name (str): Description of Team 2's jersey appearance.
+    Maintains a persistent mapping of track_id → team_id across frames.
+    Uses majority-vote over recent frames to avoid flickering assignments.
     """
-    def __init__(self,
-                 team_1_class_name="white shirt",
-                 team_2_class_name="dark blue shirt",
-                 ):
-        self.team_colors = {}
-        self.player_team_dict = {}
 
-        self.team_1_class_name = team_1_class_name
-        self.team_2_class_name = team_2_class_name
+    def __init__(self, vote_window: int = 10):
+        self.clusterer   = Clusterer()
+        self.assignments: dict[int, int]       = {}   # track_id → team_id
+        self.history:     dict[int, list[int]] = {}   # track_id → recent votes
+        self.vote_window = vote_window
+        self._fitted     = False
 
-    def load_model(self):
-        """Loads the pre-trained vision model for jersey color classification."""
-        self.model     = CLIPModel.from_pretrained("patrickjohncyh/fashion-clip")
-        self.processor = CLIPProcessor.from_pretrained("patrickjohncyh/fashion-clip")
-
-    def get_player_color(self, frame, bbox):
+    # ------------------------------------------------------------------
+    def fit_on_frame(self, frame: np.ndarray, player_tracks: np.ndarray):
         """
-        Analyzes the jersey color of a player within the given bounding box.
-
-        Returns:
-            str: The classified jersey color/description.
+        Call on the first frame (or any frame with many players visible).
+        player_tracks : (N, 5) array → [x1, y1, x2, y2, track_id]
         """
-        image = frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
+        if len(player_tracks) < 2:
+            return
+        bboxes = player_tracks[:, :4].tolist()
+        self.clusterer.fit(frame, bboxes)
+        self._fitted = True
 
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb_image)
-        image     = pil_image
-
-        classes = [self.team_1_class_name, self.team_2_class_name]
-
-        inputs = self.processor(text=classes, images=image, return_tensors="pt", padding=True)
-
-        outputs          = self.model(**inputs)
-        logits_per_image = outputs.logits_per_image
-        probs            = logits_per_image.softmax(dim=1)
-
-        return classes[probs.argmax(dim=1)[0]]
-
-    def get_player_team(self, frame, player_bbox, player_id):
+    # ------------------------------------------------------------------
+    def update(self, frame: np.ndarray, player_tracks: np.ndarray) -> dict:
         """
-        Gets the team assignment for a player, using cached results if available.
-
-        Returns:
-            int: Team ID (1 or 2) assigned to the player.
+        Assigns a team to every tracked player in this frame.
+        Returns dict: {track_id: team_id}
         """
-        if player_id in self.player_team_dict:
-            return self.player_team_dict[player_id]
+        if not self._fitted or len(player_tracks) == 0:
+            return {}
 
-        player_color = self.get_player_color(frame, player_bbox)
+        frame_assignments = {}
 
-        team_id = 2
-        if player_color == self.team_1_class_name:
-            team_id = 1
+        for track in player_tracks:
+            x1, y1, x2, y2, track_id = track
+            track_id = int(track_id)
+            bbox = [x1, y1, x2, y2]
 
-        self.player_team_dict[player_id] = team_id
-        return team_id
+            # Get raw cluster label for this frame
+            raw_label = self.clusterer.assign_team(frame, bbox)
 
-    def get_player_teams_across_frames(self, video_frames, player_tracks,
-                                       read_from_stub=False, stub_path=None):
-        """
-        Processes all video frames to assign teams to players, with optional caching.
+            # Accumulate votes
+            if track_id not in self.history:
+                self.history[track_id] = []
+            self.history[track_id].append(raw_label)
 
-        Returns:
-            list: List of dicts mapping player IDs to team assignments for each frame.
-        """
-        player_assignment = read_stub(read_from_stub, stub_path)
-        if player_assignment is not None:
-            if len(player_assignment) == len(video_frames):
-                return player_assignment
+            # Limit vote window
+            if len(self.history[track_id]) > self.vote_window:
+                self.history[track_id].pop(0)
 
-        self.load_model()
+            # Majority vote → stable assignment
+            votes = self.history[track_id]
+            team_id = int(np.bincount(votes).argmax())
+            self.assignments[track_id] = team_id
+            frame_assignments[track_id] = team_id
 
-        player_assignment = []
-        for frame_num, player_track in enumerate(player_tracks):
-            player_assignment.append({})
+        return frame_assignments
 
-            if frame_num % 50 == 0:
-                self.player_team_dict = {}
+    # ------------------------------------------------------------------
+    def get_team(self, track_id: int) -> int:
+        """Returns the current team assignment for a track_id, or -1."""
+        return self.assignments.get(track_id, -1)
 
-            for player_id, track in player_track.items():
-                team = self.get_player_team(
-                    video_frames[frame_num],
-                    track['bbox'],
-                    player_id,
-                )
-                player_assignment[frame_num][player_id] = team
+    def get_team_color(self, team_id: int) -> tuple:
+        return self.clusterer.get_team_color_bgr(team_id)
 
-        save_stub(stub_path, player_assignment)
-        return player_assignment
+    def is_ready(self) -> bool:
+        return self._fitted

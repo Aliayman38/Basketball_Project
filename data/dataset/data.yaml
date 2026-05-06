@@ -1,13 +1,13 @@
-path: data/dataset  
-train: train/images
-val: valid/images   
-test: test/images   
+train: ../train/images
+val: ../valid/images
+test: ../test/images
 
-nc: 6
-names: ['Ball', 'Clock', 'Hoop', 'Overlay', 'Player', 'Ref']
+nc: 7
+names: ['3pt_area', 'ball', 'court', 'hoop', 'number', 'paint', 'player']
+
 roboflow:
-  workspace: workspace-5ujvu
-  project: basketball-players-fy4c2-vfsuv
-  version: 11
+  workspace: basketball-stat-tracker
+  project: basketball-hoop-ball-and-player
+  version: 6
   license: CC BY 4.0
-  url: https://universe.roboflow.com/workspace-5ujvu/basketball-players-fy4c2-vfsuv/dataset/11
+  url: https://universe.roboflow.com/basketball-stat-tracker/basketball-hoop-ball-and-player/dataset/6

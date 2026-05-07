@@ -1,266 +1,101 @@
-import numpy as np
-
-
-# ---------------------------------------------------------------------------
-# Kalman Filter (1 per track)
-# ---------------------------------------------------------------------------
-class KalmanBoxTracker:
-    count = 0
-
-    def __init__(self, bbox: list):
-        from filterpy.kalman import KalmanFilter
-
-        self.kf = KalmanFilter(dim_x=7, dim_z=4)
-        self.kf.F = np.array([
-            [1,0,0,0,1,0,0],
-            [0,1,0,0,0,1,0],
-            [0,0,1,0,0,0,1],
-            [0,0,0,1,0,0,0],
-            [0,0,0,0,1,0,0],
-            [0,0,0,0,0,1,0],
-            [0,0,0,0,0,0,1],
-        ], dtype=float)
-
-        self.kf.H = np.array([
-            [1,0,0,0,0,0,0],
-            [0,1,0,0,0,0,0],
-            [0,0,1,0,0,0,0],
-            [0,0,0,1,0,0,0],
-        ], dtype=float)
-
-        self.kf.R[2:, 2:] *= 10.0
-        self.kf.P[4:, 4:] *= 1000.0
-        self.kf.P         *= 10.0
-        self.kf.Q[-1, -1] *= 0.01
-        self.kf.Q[4:, 4:] *= 0.01
-
-        self.kf.x[:4] = self._bbox_to_z(bbox)
-
-        self.time_since_update = 0
-        self.id                = KalmanBoxTracker.count
-        KalmanBoxTracker.count += 1
-
-        self.history    = []
-        self.hits       = 0
-        self.hit_streak = 0
-        self.age        = 0
-
-        # OC-SORT: store previous observations for velocity estimation
-        self.observations: dict[int, np.ndarray] = {}
-        self.last_observation = np.array(bbox)
-        self.delta_t = 3
-
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _bbox_to_z(bbox):
-        x1, y1, x2, y2 = bbox
-        w = x2 - x1
-        h = y2 - y1
-        cx = x1 + w / 2
-        cy = y1 + h / 2
-        s = w * h
-        r = w / float(h + 1e-6)
-        return np.array([cx, cy, s, r]).reshape(4, 1)
-
-    @staticmethod
-    def _z_to_bbox(x, score=None):
-        cx, cy, s, r = x[0], x[1], x[2], x[3]
-        w = np.sqrt(abs(s * r))
-        h = abs(s) / (w + 1e-6)
-        bbox = [cx - w/2, cy - h/2, cx + w/2, cy + h/2]
-        if score is None:
-            return bbox
-        return bbox + [score]
-
-    # ------------------------------------------------------------------
-    def update(self, bbox: list):
-        self.time_since_update = 0
-        self.history = []
-        self.hits += 1
-        self.hit_streak += 1
-
-        # OC-SORT: store observation with current age
-        self.observations[self.age] = np.array(bbox)
-        self.last_observation = np.array(bbox)
-
-        self.kf.update(self._bbox_to_z(bbox))
-
-    def predict(self):
-        if (self.kf.x[6] + self.kf.x[2]) <= 0:
-            self.kf.x[6] *= 0.0
-
-        self.kf.predict()
-        self.age += 1
-
-        if self.time_since_update > 0:
-            self.hit_streak = 0
-        self.time_since_update += 1
-
-        pred = self._z_to_bbox(self.kf.x)
-        self.history.append(pred)
-        return self.history[-1]
-
-    def get_state(self):
-        return self._z_to_bbox(self.kf.x)
-
-
-# ---------------------------------------------------------------------------
-# IoU helpers
-# ---------------------------------------------------------------------------
-def iou_batch(bb_test: np.ndarray, bb_gt: np.ndarray) -> np.ndarray:
-    bb_gt = np.expand_dims(bb_gt, 0)
-    bb_test = np.expand_dims(bb_test, 1)
-
-    xx1 = np.maximum(bb_test[..., 0], bb_gt[..., 0])
-    yy1 = np.maximum(bb_test[..., 1], bb_gt[..., 1])
-    xx2 = np.minimum(bb_test[..., 2], bb_gt[..., 2])
-    yy2 = np.minimum(bb_test[..., 3], bb_gt[..., 3])
-
-    w = np.maximum(0.0, xx2 - xx1)
-    h = np.maximum(0.0, yy2 - yy1)
-    inter = w * h
-
-    area_test = (bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])
-    area_gt   = (bb_gt[...,  2] - bb_gt[...,  0]) * (bb_gt[...,  3] - bb_gt[...,  1])
-
-    return inter / (area_test + area_gt - inter + 1e-6)
-
-
-def linear_assignment(cost_matrix: np.ndarray):
-    try:
-        from scipy.optimize import linear_sum_assignment
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        return np.stack([row_ind, col_ind], axis=1)
-    except ImportError:
-        raise ImportError("scipy is required: pip install scipy")
-
-
-def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
-    if len(trackers) == 0:
-        return (
-            np.empty((0, 2), dtype=int),
-            np.arange(len(detections)),
-            np.empty(0, dtype=int)
-        )
-
-    iou_matrix = iou_batch(detections, trackers)
-
-    if min(iou_matrix.shape) > 0:
-        a = (iou_matrix > iou_threshold).astype(int)
-        if a.sum(1).max() == 1 and a.sum(0).max() == 1:
-            matched_indices = np.stack(np.where(a), axis=1)
-        else:
-            matched_indices = linear_assignment(-iou_matrix)
-    else:
-        matched_indices = np.empty((0, 2))
-
-    unmatched_detections = [d for d in range(len(detections))
-                            if d not in matched_indices[:, 0]]
-    unmatched_trackers   = [t for t in range(len(trackers))
-                            if t not in matched_indices[:, 1]]
-
-    matches = []
-    for m in matched_indices:
-        if iou_matrix[m[0], m[1]] < iou_threshold:
-            unmatched_detections.append(m[0])
-            unmatched_trackers.append(m[1])
-        else:
-            matches.append(m.reshape(1, 2))
-
-    matches = np.concatenate(matches, axis=0) if matches else np.empty((0, 2), dtype=int)
-    return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
-
-
-# ---------------------------------------------------------------------------
-# OC-SORT Tracker
-# ---------------------------------------------------------------------------
-class OCSortTracker:
+class BasketballTracker:
     """
-    Simplified OC-SORT tracker.
-    Accepts raw bbox detections and returns tracked objects with stable IDs.
+    Maps unstable boxmot IDs -> stable custom IDs per class.
+
+    Stability trick: when a boxmot_id disappears, its custom slot is held in
+    a cooldown for GRACE_FRAMES before being freed.  This prevents the slot
+    from immediately being recycled to a different player during brief
+    occlusions, which was the main cause of flickering IDs.
     """
 
-    def __init__(
-        self,
-        max_age: int        = 30,
-        min_hits: int       = 3,
-        iou_threshold: float = 0.3,
-        det_thresh: float   = 0.3,
-        delta_t: int        = 3,
-    ):
-        self.max_age       = max_age
-        self.min_hits      = min_hits
-        self.iou_threshold = iou_threshold
-        self.det_thresh    = det_thresh
-        self.delta_t       = delta_t
+    GRACE_FRAMES = 45   # ~1.5 s at 30 fps — tune if needed
 
-        self.trackers:   list[KalmanBoxTracker] = []
-        self.frame_count = 0
+    def __init__(self):
+        self.names = {0: "basketball", 1: "net", 2: "player", 3: "referee"}
 
-        KalmanBoxTracker.count = 0   # reset IDs on new tracker
+        # Classes that get custom IDs (basketball is drawn raw, never tracked)
+        self.max_ids = {"player": 10, "referee": 4, "net": 2}
+
+        # boxmot_id -> custom_id  (currently visible tracks)
+        self.active = {c: {} for c in self.max_ids}
+
+        # custom_id -> frames_remaining  (recently departed tracks)
+        # Slot is NOT available for reuse until counter reaches 0.
+        self.cooling = {c: {} for c in self.max_ids}
 
     # ------------------------------------------------------------------
-    def update(self, detections: list) -> np.ndarray:
+    def update_ids(self, boxmot_tracks):
         """
-        detections : list of dicts with 'bbox' and 'confidence'
-        Returns   : np.ndarray shape (N, 5) → [x1, y1, x2, y2, track_id]
+        Call once per frame with the raw boxmot output array.
+        Returns a list of dicts ready for drawing.
         """
-        self.frame_count += 1
+        tracked_objects = []
+        if len(boxmot_tracks) == 0:
+            self._tick_cooldowns()
+            return tracked_objects
 
-        # Build detection array [x1,y1,x2,y2,conf]
-        dets_array = np.zeros((0, 5))
-        if detections:
-            dets_array = np.array([
-                d["bbox"] + [d["confidence"]]
-                for d in detections
-                if d["confidence"] >= self.det_thresh
-            ])
+        # 1. Collect which boxmot IDs are alive this frame, per class
+        current_ids = {c: set() for c in self.max_ids}
+        for track in boxmot_tracks:
+            _, _, _, _, ori_id, _, cls_idx = track[:7]
+            cls_name = self.names[int(cls_idx)]
+            if cls_name in current_ids:
+                current_ids[cls_name].add(int(ori_id))
 
-        # Predict existing trackers
-        trks = np.zeros((len(self.trackers), 5))
-        to_del = []
-        for t_idx, trk in enumerate(self.trackers):
-            pos = trk.predict()
-            trks[t_idx] = pos + [0]
-            if np.any(np.isnan(pos)):
-                to_del.append(t_idx)
+        # 2. Move departed boxmot IDs into cooldown
+        for cls_name, id_map in self.active.items():
+            departed = set(id_map.keys()) - current_ids[cls_name]
+            for dead_id in departed:
+                custom_id = id_map.pop(dead_id)
+                self.cooling[cls_name][custom_id] = self.GRACE_FRAMES
 
-        trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
-        for t_idx in reversed(to_del):
-            self.trackers.pop(t_idx)
+        # 3. Tick down cooldowns; free expired slots
+        self._tick_cooldowns()
 
-        # Associate
-        if dets_array.shape[0] > 0:
-            matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(
-                dets_array[:, :4], trks[:, :4], self.iou_threshold
-            )
-        else:
-            matched          = np.empty((0, 2), dtype=int)
-            unmatched_dets   = np.empty(0,      dtype=int)
-            unmatched_trks   = np.arange(len(self.trackers))
+        # 4. Assign custom IDs and build output
+        for track in boxmot_tracks:
+            x1, y1, x2, y2, ori_id, score, cls_idx = track[:7]
+            cls_name = self.names[int(cls_idx)]
+            ori_id   = int(ori_id)
 
-        # Update matched trackers
-        for m in matched:
-            self.trackers[m[1]].update(dets_array[m[0], :4].tolist())
+            custom_id = self._assign(cls_name, ori_id)
 
-        # Create new trackers for unmatched detections
-        for idx in unmatched_dets:
-            self.trackers.append(KalmanBoxTracker(dets_array[idx, :4].tolist()))
+            tracked_objects.append({
+                "bbox":       [int(x1), int(y1), int(x2), int(y2)],
+                "track_id":   custom_id,
+                "class_name": cls_name,
+                "conf":       float(score),
+            })
 
-        # Collect outputs
-        results = []
-        for trk in reversed(self.trackers):
-            if (trk.time_since_update < 1) and \
-               (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
-                d = trk.get_state()
-                results.append([*d, trk.id + 1])   # 1-indexed ID
+        return tracked_objects
 
-        # Remove dead trackers
-        self.trackers = [t for t in self.trackers if t.time_since_update <= self.max_age]
+    # ------------------------------------------------------------------
+    def _assign(self, cls_name, ori_id):
+        if cls_name not in self.max_ids:
+            return ori_id
 
-        return np.array(results) if results else np.empty((0, 5))
+        id_map  = self.active[cls_name]
+        cooling = self.cooling[cls_name]
+        max_id  = self.max_ids[cls_name]
 
-    def reset(self):
-        self.trackers    = []
-        self.frame_count = 0
-        KalmanBoxTracker.count = 0
+        if ori_id in id_map:
+            return id_map[ori_id]
+
+        # Find the lowest custom ID that is neither active nor cooling
+        occupied = set(id_map.values()) | set(cooling.keys())
+        for candidate in range(1, max_id + 1):
+            if candidate not in occupied:
+                id_map[ori_id] = candidate
+                return candidate
+
+        # All slots occupied — use raw boxmot ID so player is still drawn
+        return ori_id
+
+    def _tick_cooldowns(self):
+        for cooling in self.cooling.values():
+            expired = [cid for cid, t in cooling.items() if t <= 1]
+            for cid in expired:
+                del cooling[cid]
+            for cid in list(cooling):
+                if cid not in expired:
+                    cooling[cid] -= 1

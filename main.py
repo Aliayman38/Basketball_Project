@@ -7,10 +7,20 @@ import torch
 import scipy.linalg
 from pathlib import Path
 from collections import defaultdict
+import csv
 
 from detection.detector              import BasketballDetector
 from team_clustering.clusterer       import CLIPTeamClusterer
 from boxmot.trackers.botsort.botsort import BotSort
+
+# ── Analytics modules ───────────────────────────────────────────────────────
+import sys
+analytics_dir = Path(__file__).parent / "analytics"
+if str(analytics_dir) not in sys.path:
+    sys.path.insert(0, str(analytics_dir.parent))
+
+from src.analytics.distance import build_report as build_distance_report, export_csv as export_distance_csv
+from src.analytics.speed  import build_speed_report, export_csv as export_speed_csv
 
 # ── Kalman stability patch ────────────────────────────────────────────────────
 from boxmot.motion.kalman_filters.base import BaseKalmanFilter
@@ -130,39 +140,188 @@ def make_trajectory_record(frame_idx, x1, y1, x2, y2, extra=None):
 
 
 def save_trajectories(trajectories: dict, path: str):
-    """
-    Saves trajectories.json next to the output video.
-
-    Structure:
-    {
-      "players": {
-        "1": [{"frame": 0, "bbox": [...], "center": [...], "team": "T1"}, ...],
-        "2": [...]
-      },
-      "referees": {
-        "1": [{"frame": 0, "bbox": [...], "center": [...]}, ...]
-      },
-      "ball": [{"frame": 0, "bbox": [...], "center": [...]}, ...],
-      "net": {
-        "1": [...]
-      }
-    }
-    """
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, 'w') as f:
         json.dump(trajectories, f, indent=2)
     print(f'   Trajectories → {path}')
 
 
+# ── Analytics ───────────────────────────────────────────────────────────────────
+
+def run_analytics(trajectories: dict, fps: float, analytics_dir: Path,
+                  meters_per_pixel: float | None = None,
+                  include_referees: bool = False):
+    """Compute and export distance & speed reports from trajectories."""
+    
+    # ── Distance report ─────────────────────────────────────────────────────
+    flat_trajectories: dict[str, list] = {}
+    for pid, pts in trajectories.get("players", {}).items():
+        flat_trajectories[pid] = pts
+    if include_referees:
+        for rid, pts in trajectories.get("referees", {}).items():
+            flat_trajectories[f"ref_{rid}"] = pts
+    
+    distance_rows = build_distance_report(flat_trajectories, meters_per_pixel)
+    distance_path = analytics_dir / "distance_report.csv"
+    export_distance_csv(distance_rows, distance_path)
+    
+    # ── Speed report ─────────────────────────────────────────────────────────
+    speed_input: dict[str, list[list[float]]] = {}
+    for pid, records in trajectories.get("players", {}).items():
+        speed_input[pid] = [
+            [r["center"][0], r["center"][1], float(r["frame"])]
+            for r in records
+        ]
+    
+    speed_rows = build_speed_report(speed_input, fps=fps, meters_per_pixel=meters_per_pixel)
+    speed_path = analytics_dir / "speed_report.csv"
+    export_speed_csv(speed_rows, speed_path)
+    
+    print(f"\n📊 Analytics saved to {analytics_dir}/")
+
+
+# ── Visualization ─────────────────────────────────────────────────────────────
+
+def load_csv(path: str) -> dict[str, dict[str, str]]:
+    """Parse a CSV into {player_id: {column: value}} dict."""
+    result = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            pid = row.get("player_id", "").strip()
+            if pid:
+                result[pid] = {k.strip(): v.strip() for k, v in row.items()}
+    return result
+
+
+def load_frame_index(path: str, gap_threshold: int = 30) -> dict[int, dict[str, tuple[int, int]]]:
+    """Build frame-indexed lookup with linear interpolation across tracking gaps."""
+    with open(path, encoding="utf-8") as f:
+        players: dict[str, list] = json.load(f)["players"]
+
+    frames: dict[int, dict[str, tuple[int, int]]] = defaultdict(dict)
+
+    for pid, points in players.items():
+        detections: list[tuple[int, int, int]] = []
+        for point in points:
+            try:
+                frame = int(point["frame"])
+                x, y = point["center"]
+                detections.append((frame, int(x), int(y)))
+            except (TypeError, IndexError, ValueError):
+                continue
+
+        if not detections:
+            continue
+
+        detections.sort()
+
+        for frame, x, y in detections:
+            frames[frame][pid] = (x, y)
+
+        for (f0, x0, y0), (f1, x1, y1) in zip(detections, detections[1:]):
+            gap = f1 - f0
+            if gap <= 1 or gap > gap_threshold:
+                continue
+            for step in range(1, gap):
+                t = step / gap
+                xi = round(x0 + t * (x1 - x0))
+                yi = round(y0 + t * (y1 - y0))
+                frames[f0 + step].setdefault(pid, (xi, yi))
+
+    return frames
+
+
+_UNIT_MAP: dict[str, str] = {
+    "total_distance_m":  "m",
+    "total_distance_px": "px",
+    "avg_speed_m_s":     "m/s",
+    "avg_speed_px_s":    "px/s",
+}
+
+
+def pick(row: dict[str, str], metric_key: str, pixel_key: str) -> tuple[str, str]:
+    """Return (value, display_unit) preferring metric, falling back to pixels."""
+    if metric_key in row and row[metric_key]:
+        return row[metric_key], _UNIT_MAP.get(metric_key, "m")
+    if pixel_key in row and row[pixel_key]:
+        return row[pixel_key], _UNIT_MAP.get(pixel_key, "px")
+    return "0", "px"
+
+
+def run_visualization(
+    video_path: str,
+    trajectories_path: str,
+    distance_csv: str,
+    speed_csv: str,
+    output_path: str,
+) -> None:
+    """Overlay tracked player statistics (distance & speed) onto the tracked video."""
+    
+    frames_data = load_frame_index(trajectories_path)
+    dist_data   = load_csv(distance_csv)
+    speed_data  = load_csv(speed_csv)
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Cannot open video: {video_path}")
+
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        for pid, (x, y) in frames_data.get(frame_idx, {}).items():
+            d_row = dist_data.get(pid, {})
+            s_row = speed_data.get(pid, {})
+
+            dist,  d_unit = pick(d_row, "total_distance_m",  "total_distance_px")
+            speed, s_unit = pick(s_row, "avg_speed_m_s",     "avg_speed_px_s")
+
+            text = f"D: {float(dist):.1f}{d_unit} | S: {float(speed):.2f}{s_unit}"
+            label_x = max(5, min(x - 120, frame.shape[1] - 350))
+            label_y = max(30, y - 60)
+
+            cv2.putText(
+                frame,
+                text,
+                (label_x, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+                cv2.LINE_AA
+            )
+
+        writer.write(frame)
+        frame_idx += 1
+
+    cap.release()
+    writer.release()
+    print(f"\n🎬 Final video with stats → {output_path}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    video_path       = 'data/video_2.mp4'
-    model_path       = 'models/weights/last.pt'
-    output_path      = 'runs/bot-sort tracking/tracking_botsort.mp4'
+    # ── Configuration ───────────────────────────────────────────────────────
+    video_path        = 'data/video_2.mp4'
+    model_path        = 'models/weights/last.pt'
+    output_path       = 'runs/bot-sort tracking/tracking_botsort.mp4'
     trajectories_path = 'runs/bot-sort tracking/analytics/trajectories.json'
-    reid_path        = 'osnet_x0_25_msmt17.pt'
-    device           = torch.device('cuda:0')
+    reid_path         = 'osnet_x0_25_msmt17.pt'
+    device            = torch.device('cuda:0')
+    
+    # Analytics config
+    meters_per_pixel = 0.0264
+    include_referees = False
 
     os.makedirs('runs', exist_ok=True)
 
@@ -199,7 +358,7 @@ def main():
 
     # ── trajectory accumulators ───────────────────────────────────────────────
     trajectories = {
-        "players":  defaultdict(list),   # key = str(custom_id)
+        "players":  defaultdict(list),
         "referees": defaultdict(list),
         "net":      defaultdict(list),
         "ball":     [],
@@ -272,7 +431,6 @@ def main():
                     team_name = clip.TEAM_NAMES[team_idx]
                     label     = f'{team_name} {custom_id}'
 
-                # record player trajectory
                 record = make_trajectory_record(
                     frame_count, x1, y1, x2, y2,
                     extra={"team": team_name} if team_name else None
@@ -312,17 +470,37 @@ def main():
     cap.release()
     writer.release()
 
-    # convert defaultdicts to plain dicts for clean JSON
     trajectories["players"]  = dict(trajectories["players"])
     trajectories["referees"] = dict(trajectories["referees"])
     trajectories["net"]      = dict(trajectories["net"])
 
     save_trajectories(trajectories, trajectories_path)
 
+    # ── Analytics ──────────────────────────────────────────────────────────
+    analytics_dir = Path(trajectories_path).parent
+    run_analytics(
+        trajectories=trajectories,
+        fps=fps,
+        analytics_dir=analytics_dir,
+        meters_per_pixel=meters_per_pixel,
+        include_referees=include_referees,
+    )
+
+    # ── Visualization ────────────────────────────────────────────────────────
+    final_output = str(Path(output_path).parent / "final_output.mp4")
+    run_visualization(
+        video_path=output_path,
+        trajectories_path=trajectories_path,
+        distance_csv=str(analytics_dir / "distance_report.csv"),
+        speed_csv=str(analytics_dir / "speed_report.csv"),
+        output_path=final_output,
+    )
+
     elapsed = time.time() - t0
     print(f'\n✅ Done — {frame_count} frames in {elapsed:.1f}s '
           f'({frame_count / elapsed:.1f} FPS avg)')
-    print(f'   Video        → {output_path}')
+    print(f'   Tracked video  → {output_path}')
+    print(f'   Final video    → {final_output}')
 
 
 if __name__ == '__main__':

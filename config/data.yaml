@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 4
+names: ['basketball', 'net', 'player', 'referee']
+
+roboflow:
+  workspace: asas-annotations
+  project: ai-sports-analytics-system
+  version: 7
+  license: MIT
+  url: https://universe.roboflow.com/asas-annotations/ai-sports-analytics-system/dataset/7

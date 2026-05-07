@@ -1,100 +1,135 @@
+"""
+team_clustering.py
+──────────────────
+Offline two-pass team clustering for basketball tracking.
+Modified: Fixed Cython Buffer dtype mismatch (Forced float64 everywhere).
+"""
+
+from __future__ import annotations
+
 import cv2
 import numpy as np
+from collections import defaultdict
 from sklearn.cluster import KMeans
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-class Clusterer:
-    """
-    Extracts the dominant jersey color from a player crop and
-    clusters all players into 2 teams using KMeans.
+def _jersey_crop(bgr_crop: np.ndarray) -> np.ndarray:
+    """Return only the torso region to focus on jersey colour."""
+    h, w = bgr_crop.shape[:2]
+    y0 = int(h * 0.20)
+    y1 = int(h * 0.60)
+    x0 = int(w * 0.20)
+    x1 = int(w * 0.80)
+    return bgr_crop[y0:y1, x0:x1]
 
-    Strategy:
-    - Crop only the TOP HALF of the player bounding box (jersey, not shorts)
-    - Remove the background using a secondary 2-cluster KMeans on the crop
-    - Use the resulting foreground color as the player's representative color
-    - Fit a global 2-cluster KMeans on the first frame to define Team 0 / Team 1
-    """
 
-    def __init__(self):
-        self.team_kmeans: KMeans | None = None
-        self.team_colors: dict = {}   # {team_id: [R, G, B]}
+def _colour_histogram(bgr: np.ndarray, bins: int = 32) -> np.ndarray:
+    """L*a*b* histogram. Returns a flat, L2-normalised feature vector."""
+    if bgr is None or bgr.size == 0:
+        return np.zeros(bins * 2, dtype=np.float64) # Changed to float64
 
-    # ------------------------------------------------------------------
-    def _get_jersey_color(self, frame: np.ndarray, bbox: list) -> np.ndarray:
-        """Returns a single representative BGR color for the player's jersey."""
-        x1, y1, x2, y2 = [int(v) for v in bbox]
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab)
+    feats = []
+    for ch in (1, 2):          
+        hist = cv2.calcHist([lab], [ch], None, [bins], [0, 256])
+        feats.append(hist.flatten())
 
-        # Clamp to frame boundaries
-        h_frame, w_frame = frame.shape[:2]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w_frame, x2), min(h_frame, y2)
+    # Changed to float64 to prevent Cython buffer mismatch
+    vec = np.concatenate(feats).astype(np.float64) 
+    norm = np.linalg.norm(vec)
+    return vec / norm if norm > 0 else vec
 
-        if x2 <= x1 or y2 <= y1:
-            return np.array([0, 0, 0])
 
-        crop = frame[y1:y2, x1:x2]
+# ─────────────────────────────────────────────────────────────────────────────
+# Main class
+# ─────────────────────────────────────────────────────────────────────────────
 
-        # Use only top 50 % (jersey area)
-        top_half = crop[: crop.shape[0] // 2, :]
+class TeamClusterer:
+    TEAM_COLORS = {
+        0: (0,   180, 255),    # Team A  — amber/orange
+        1: (180,  60, 255),    # Team B  — violet
+    }
+    TEAM_NAMES = {0: 'A', 1: 'B'}
 
-        if top_half.size == 0:
-            return np.array([0, 0, 0])
+    def __init__(
+        self,
+        n_teams: int = 2,
+        max_crops_per_track: int = 60,
+        bins: int = 32,
+        min_crops: int = 5,
+    ):
+        self.n_teams             = n_teams
+        self.max_crops_per_track = max_crops_per_track
+        self.bins                = bins
+        self.min_crops           = min_crops
 
-        # Resize for speed
-        small = cv2.resize(top_half, (30, 30))
-        pixels = small.reshape(-1, 3).astype(float)
+        self._features: dict[int, list[np.ndarray]] = defaultdict(list)
+        self._team_map: dict[int, int] = {}
+        self._is_fitted = False
+        self.km = None 
 
-        # Remove background: cluster the crop into 2 (bg vs jersey)
-        km = KMeans(n_clusters=2, random_state=42, n_init=3)
-        km.fit(pixels)
+    # ── Pass 1 ───────────────────────────────────────────────────────────────
+    def collect(self, ori_id: int, crop: np.ndarray) -> None:
+        if len(self._features[ori_id]) >= self.max_crops_per_track:
+            return
+        torso = _jersey_crop(crop)
+        if torso.size == 0:
+            return
+        feat = _colour_histogram(torso, bins=self.bins)
+        self._features[ori_id].append(feat)
 
-        # Corner pixels are typically background
-        corners = [pixels[0], pixels[29], pixels[870], pixels[899]]
-        corner_labels = km.predict(corners)
-        bg_label = int(np.bincount(corner_labels).argmax())
-        jersey_label = 1 - bg_label
+    # ── Fit ──────────────────────────────────────────────────────────────────
+    def fit(self) -> None:
+        valid_ids: list[int] = []
+        rep_vecs:  list[np.ndarray] = []
 
-        return km.cluster_centers_[jersey_label]   # BGR float
+        for ori_id, feats in self._features.items():
+            if len(feats) < self.min_crops:
+                continue
+            # Changed to float64
+            rep = np.median(np.stack(feats), axis=0).astype(np.float64)
+            norm = np.linalg.norm(rep)
+            if norm > 0:
+                rep /= norm
+            valid_ids.append(ori_id)
+            rep_vecs.append(rep)
 
-    # ------------------------------------------------------------------
-    def fit(self, frame: np.ndarray, player_bboxes: list):
-        """
-        Fit the 2-cluster KMeans on the FIRST usable frame.
-        Call this ONCE, then use assign_team() for all subsequent frames.
-        """
-        colors = []
-        for bbox in player_bboxes:
-            color = self._get_jersey_color(frame, bbox)
-            colors.append(color)
+        if len(valid_ids) < self.n_teams:
+            print(f"[TeamClusterer] ⚠ Not enough valid tracks. All players 'unknown'.")
+            self._is_fitted = True
+            return
 
-        if len(colors) < 2:
-            return   # not enough players to determine teams
+        X = np.stack(rep_vecs)
+        self.km = KMeans(n_clusters=self.n_teams, n_init=20, random_state=42)
+        labels = self.km.fit_predict(X)
 
-        self.team_kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
-        self.team_kmeans.fit(colors)
+        for ori_id, label in zip(valid_ids, labels):
+            self._team_map[ori_id] = int(label)
 
-        # Store representative colors for visualization
-        self.team_colors[0] = self.team_kmeans.cluster_centers_[0].astype(int).tolist()
-        self.team_colors[1] = self.team_kmeans.cluster_centers_[1].astype(int).tolist()
+        self._is_fitted = True
+        print("[TeamClusterer] ✅ Clustering done.")
 
-    # ------------------------------------------------------------------
-    def assign_team(self, frame: np.ndarray, bbox: list) -> int:
-        """
-        Returns team label (0 or 1) for a single player.
-        Requires fit() to have been called first.
-        """
-        if self.team_kmeans is None:
-            return -1
+    # ── THE NEW PREDICTION METHOD ────────────────────────────────────────────
+    def predict(self, crop: np.ndarray) -> int | None:
+        """Predicts the team directly from the image crop (ignores faulty IDs)."""
+        if not self._is_fitted or self.km is None:
+            return None
+            
+        torso = _jersey_crop(crop)
+        if torso.size == 0:
+            return None
+            
+        feat = _colour_histogram(torso, bins=self.bins)
+        
+        # Now everything is strictly float64!
+        team_idx = int(self.km.predict([feat])[0])
+        return team_idx
 
-        color = self._get_jersey_color(frame, bbox)
-        label = int(self.team_kmeans.predict([color])[0])
-        return label
-
-    # ------------------------------------------------------------------
-    def get_team_color_bgr(self, team_id: int) -> tuple:
-        """Return the BGR tuple for a team's representative color."""
-        color = self.team_colors.get(team_id, [128, 128, 128])
-        return tuple(int(c) for c in color)
-
-    def is_fitted(self) -> bool:
-        return self.team_kmeans is not None
+    def team_summary(self) -> dict[str, list[int]]:
+        summary: dict[str, list[int]] = defaultdict(list)
+        for ori_id, idx in self._team_map.items():
+            summary[self.TEAM_NAMES.get(idx, 'unknown')].append(ori_id)
+        return dict(summary)

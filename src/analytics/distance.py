@@ -32,15 +32,27 @@ Row   = dict[str, Any]
 
 def _sanitize_trajectory(raw: list[Any]) -> list[Point]:
     """Filter invalid entries and sort by frame index."""
+
     pts: list[Point] = []
+
     for p in raw:
         try:
-            x, y, f = p
+            if isinstance(p, dict):
+                x, y = p["center"]
+                f = p["frame"]
+            else:
+                x, y, f = p
+
+            x, y, f = float(x), float(y), float(f)
+
             if math.isfinite(x) and math.isfinite(y) and math.isfinite(f):
-                pts.append((float(x), float(y), int(f)))
-        except (TypeError, ValueError):
+                pts.append((x, y, int(f)))
+
+        except (TypeError, ValueError, IndexError, KeyError):
             continue
+
     pts.sort(key=lambda p: p[2])
+
     return pts
 
 

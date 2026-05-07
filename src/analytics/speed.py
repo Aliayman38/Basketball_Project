@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Optional, Union
 
+import cv2
+
 
 # ---------------------------------------------------------------------------
 # I/O helpers
@@ -55,6 +57,38 @@ def export_csv(records: list[dict], output: Union[str, Path]) -> None:
     print(f"Speed report saved → {output}")
 
 
+
+# ---------------------------------------------------------------------------
+# Video helpers
+# ---------------------------------------------------------------------------
+
+def get_video_fps(video_path: Union[str, Path]) -> float:
+    """Extract FPS from a video file using OpenCV.
+
+    Args:
+        video_path: Path to the source video file.
+
+    Returns:
+        FPS as a float.
+
+    Raises:
+        FileNotFoundError: If the video cannot be opened.
+        ValueError: If FPS cannot be read or is invalid.
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        cap.release()
+        raise FileNotFoundError(f"Cannot open video: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    cap.release()
+
+    if not fps or fps <= 0 or not math.isfinite(fps):
+        raise ValueError(f"Could not read a valid FPS from video: {video_path}")
+
+    return fps
+
+
 # ---------------------------------------------------------------------------
 # Core computation
 # ---------------------------------------------------------------------------
@@ -78,10 +112,16 @@ def compute_speed(
     valid: list[tuple[float, float, float]] = []
     for p in points:
         try:
-            x, y, frame = float(p[0]), float(p[1]), float(p[2])
+            if isinstance(p, dict):
+               x, y = p["center"]
+               frame = p["frame"]
+            else:
+               x, y, frame = p
+
+            x, y, frame = float(x), float(y), float(frame)
             if math.isfinite(x) and math.isfinite(y) and math.isfinite(frame):
                 valid.append((x, y, frame))
-        except (TypeError, IndexError, ValueError):
+        except (TypeError, IndexError, ValueError, KeyError):
             continue
 
     if len(valid) < 2:
@@ -162,6 +202,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--input", required=True, help="Path to trajectories.json")
     parser.add_argument("--output", required=True, help="Path for output CSV")
     parser.add_argument("--fps", type=float, default=30.0, help="Video frame rate (default: 30)")
+    parser.add_argument("--video", default=None,
+                        help="Source video path; FPS is extracted automatically if provided")
     parser.add_argument("--meters-per-pixel", type=float, default=None,
                         help="Scale factor for real-world speed (e.g. 0.0264)")
     return parser.parse_args()
@@ -171,8 +213,13 @@ def main() -> None:
     args = _parse_args()
 
     try:
+        # Auto-extract FPS from video if provided; otherwise fall back to --fps
+        fps = get_video_fps(args.video) if args.video else args.fps
+        if args.video:
+            print(f"FPS extracted from video: {fps}")
+
         trajectories = load_trajectories(args.input)
-        report = build_speed_report(trajectories, fps=args.fps,
+        report = build_speed_report(trajectories, fps=fps,
                                     meters_per_pixel=args.meters_per_pixel)
         export_csv(report, args.output)
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as e:

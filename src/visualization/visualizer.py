@@ -52,7 +52,13 @@ def load_frame_index(
         detections: list[tuple[int, int, int]] = []
         for point in points:
             try:
-                x, y, frame = int(point[0]), int(point[1]), int(point[2])
+
+                frame = int(point["frame"])
+
+                x, y = point["center"]
+                x = int(x)
+                y = int(y)
+
                 detections.append((frame, x, y))
             except (TypeError, IndexError, ValueError):
                 continue
@@ -100,14 +106,32 @@ def pick(row: dict[str, str], metric_key: str, pixel_key: str) -> tuple[str, str
 
 
 def draw_label(frame, x: int, y: int, text: str) -> None:
-    """Draw yellow text on a black filled rectangle above (x, y)."""
-    font, scale, thickness = cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+    """Draw clear stats label above player."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.75
+    thickness = 2
+
     (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
-    pad = 3
-    x1, y1 = x - pad, y - th - pad * 2 - 10
-    x2, y2 = x + tw + pad, y - 10
+    pad = 6
+
+    # move label higher above the player center
+    x1 = max(0, x - tw // 2 - pad)
+    y1 = max(0, y - 70 - th - pad * 2)
+    x2 = min(frame.shape[1] - 1, x + tw // 2 + pad)
+    y2 = min(frame.shape[0] - 1, y - 70)
+
     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 0), -1)
-    cv2.putText(frame, text, (x, y2 - baseline), font, scale, (0, 255, 255), thickness, cv2.LINE_AA)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+    cv2.putText(
+        frame,
+        text,
+        (x1 + pad, y2 - pad),
+        font,
+        scale,
+        (0, 255, 255),
+        thickness,
+        cv2.LINE_AA
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -137,14 +161,28 @@ def process_video(args: argparse.Namespace) -> None:
             break
 
         for pid, (x, y) in frames_data.get(frame_idx, {}).items():
+            print("FRAME:", frame_idx, "PID:", pid, "POS:", x, y)
             d_row = dist_data.get(pid, {})
             s_row = speed_data.get(pid, {})
 
             dist,  d_unit = pick(d_row, "total_distance_m",  "total_distance_px")
             speed, s_unit = pick(s_row, "avg_speed_m_s",     "avg_speed_px_s")
+            print("DIST:", dist, d_unit, "SPEED:", speed, s_unit)
 
             text = f"D: {float(dist):.1f}{d_unit} | S: {float(speed):.2f}{s_unit}"
-            draw_label(frame, x, y, text)
+            label_x = max(5, min(x - 120, frame.shape[1] - 350))
+            label_y = max(30, y - 60)
+
+            cv2.putText(
+                frame,
+                text,
+                (label_x, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+                cv2.LINE_AA
+            )
 
         writer.write(frame)
         frame_idx += 1

@@ -1,6 +1,6 @@
 """
 main.py
-Orchestration layer: detection → tracking → shot detection → analytics → dashboard visualization.
+Orchestration layer: detection → tracking → analytics → dashboard visualization.
 """
 
 from __future__ import annotations
@@ -10,11 +10,11 @@ import json
 import time
 import torch
 from pathlib import Path
-from collections import defaultdict
 
 from tracking.tracker import BasketballTracker, TEAM_NAMES_SHORT
+from src.analytics.dashboard import render_video
 
-# ── Analytics modules ───────────────────────────────────────────────────────
+# ── Analytics ─────────────────────────────────────────────────────────────────
 import sys
 _src = Path(__file__).parent / "src"
 if str(_src) not in sys.path:
@@ -25,11 +25,13 @@ from src.analytics.speed  import build_speed_report, export_csv as export_speed_
 from src.analytics.shot_detector import detect_shots, load_trajectory, ShotResult
 
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+#  Config
+# ═════════════════════════════════════════════════════════════════════════════
 
 VIDEO_PATH        = 'data/shooting3.mp4'
 MODEL_PATH        = 'models/weights/last.pt'
-OUTPUT_PATH       = 'runs/bot-sort tracking/dashboard/tests1.mp4'
+OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_botsort3.mp4'
 TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
 REID_PATH         = 'osnet_x0_25_msmt17.pt'
 DEVICE            = torch.device('cuda:0')
@@ -41,7 +43,9 @@ TEAM_0_DESC = "a basketball player wearing a yellow jersey"
 TEAM_1_DESC = "a basketball player wearing a dark blue jersey"
 
 
-# ── I/O helpers ───────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+#  Helpers
+# ═════════════════════════════════════════════════════════════════════════════
 
 def save_trajectories(trajectories: dict, path: str):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -49,8 +53,6 @@ def save_trajectories(trajectories: dict, path: str):
         json.dump(trajectories, f, indent=2)
     print(f'   Trajectories → {path}')
 
-
-# ── Analytics ─────────────────────────────────────────────────────────────────
 
 def run_analytics(trajectories: dict, fps: float, analytics_dir: Path,
                   meters_per_pixel: float | None = None,
@@ -62,7 +64,6 @@ def run_analytics(trajectories: dict, fps: float, analytics_dir: Path,
     if include_referees:
         for rid, pts in trajectories.get("referees", {}).items():
             flat[f"ref_{rid}"] = pts
-
     export_distance_csv(
         build_distance_report(flat, meters_per_pixel),
         analytics_dir / "distance_report.csv"
@@ -77,7 +78,6 @@ def run_analytics(trajectories: dict, fps: float, analytics_dir: Path,
         build_speed_report(speed_input, fps=fps, meters_per_pixel=meters_per_pixel),
         analytics_dir / "speed_report.csv"
     )
-
     print(f"\n📊 Analytics saved to {analytics_dir}/")
 
 
@@ -104,317 +104,8 @@ def run_shot_detection(trajectories_path: str, analytics_dir: Path) -> list[Shot
     print(f"\n🏀 Shot Detection: {len(shots)} made shot(s)")
     for rec in records:
         print(f"   Shot {rec['shot']}: frames {rec['frames']}  apex@{rec['apex_frame']}  conf={rec['confidence']:.2f}")
-
     return shots
 
-
-# ── Dashboard Visualization ─────────────────────────────────────────────────
-
-class PlayerDashboard:
-    """Fixed corner dashboard showing all player stats with team colors."""
-
-    # Team color mapping
-    TEAM_COLORS = {
-        "T1": (255, 255, 255),   # White team
-        "T2": (0, 100, 255),     # Blue team (BGR)
-        "WHITE": (255, 255, 255),
-        "BLUE": (0, 100, 255),
-        "—": (150, 150, 150),
-    }
-
-    def __init__(self, width: int, height: int, corner: str = "top-right"):
-        self.width = width
-        self.height = height
-        self.corner = corner
-
-        # Dashboard dimensions
-        self.row_h = 30
-        self.header_h = 36
-        self.col_w = [45, 115, 115, 75]  # ID | DISTANCE | SPEED | TEAM
-        self.pad = 10
-        self.panel_w = sum(self.col_w) + self.pad * 2
-        self.panel_h = self.header_h + self.row_h * 10 + self.pad * 2
-
-        # Position
-        if corner == "top-right":
-            self.x = width - self.panel_w - 15
-            self.y = 65
-        elif corner == "top-left":
-            self.x = 15
-            self.y = 65
-        elif corner == "bottom-right":
-            self.x = width - self.panel_w - 15
-            self.y = height - self.panel_h - 15
-        else:
-            self.x = 15
-            self.y = height - self.panel_h - 15
-
-    def _get_team_color(self, team: str) -> tuple:
-        """Get BGR color for team name."""
-        return self.TEAM_COLORS.get(team, (200, 200, 200))
-
-    def draw(self, frame, player_stats: list[dict]):
-        """Draw dashboard with player statistics."""
-        n_players = min(len(player_stats), 10)
-        actual_h = self.header_h + self.row_h * n_players + self.pad * 2
-
-        # Semi-transparent background
-        overlay = frame.copy()
-        cv2.rectangle(overlay, 
-                     (self.x, self.y), 
-                     (self.x + self.panel_w, self.y + actual_h),
-                     (25, 25, 35), -1)
-        cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, frame)
-
-        # Border with glow
-        cv2.rectangle(frame,
-                     (self.x, self.y),
-                     (self.x + self.panel_w, self.y + actual_h),
-                     (80, 80, 120), 2)
-        cv2.rectangle(frame,
-                     (self.x + 2, self.y + 2),
-                     (self.x + self.panel_w - 2, self.y + actual_h - 2),
-                     (60, 60, 80), 1)
-
-        # Title bar
-        title_bar_h = self.header_h - 4
-        cv2.rectangle(frame,
-                     (self.x + 3, self.y + 3),
-                     (self.x + self.panel_w - 3, self.y + title_bar_h),
-                     (50, 50, 70), -1)
-
-        title = "📊 PLAYER STATISTICS"
-        (tw, th), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-        tx = self.x + (self.panel_w - tw) // 2
-        ty = self.y + self.pad + th - 2
-        cv2.putText(frame, title, (tx, ty),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (220, 220, 240), 2, cv2.LINE_AA)
-
-        # Header row
-        headers = ["ID", "DISTANCE", "SPEED", "TEAM"]
-        hx = self.x + self.pad
-        hy = self.y + self.header_h + 2
-
-        for i, h in enumerate(headers):
-            cv2.putText(frame, h, (hx + sum(self.col_w[:i]) + 8, hy),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (180, 180, 200), 1, cv2.LINE_AA)
-
-        # Separator
-        cv2.line(frame,
-                (self.x + self.pad, hy + 6),
-                (self.x + self.panel_w - self.pad, hy + 6),
-                (80, 80, 100), 1)
-
-        # Player rows
-        y_offset = hy + self.row_h + 2
-        for i, stats in enumerate(player_stats[:10]):
-            team = stats.get("team", "—")
-            team_color = self._get_team_color(team)
-
-            # Alternating row background
-            row_bg = (35, 35, 45) if i % 2 == 0 else (30, 30, 40)
-            cv2.rectangle(frame,
-                         (self.x + 4, y_offset - self.row_h + 8),
-                         (self.x + self.panel_w - 4, y_offset + 2),
-                         row_bg, -1)
-
-            # Team color indicator (left border)
-            cv2.rectangle(frame,
-                         (self.x + 4, y_offset - self.row_h + 8),
-                         (self.x + 8, y_offset + 2),
-                         team_color, -1)
-
-            # ID (centered in column)
-            id_text = str(stats["id"])
-            (id_w, _), _ = cv2.getTextSize(id_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.putText(frame, id_text,
-                        (hx + (self.col_w[0] - id_w) // 2, y_offset),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, team_color, 1, cv2.LINE_AA)
-
-            # Distance
-            dist_text = stats.get("distance", "0.0")
-            cv2.putText(frame, dist_text,
-                        (hx + self.col_w[0] + 8, y_offset),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
-
-            # Speed (cyan highlight)
-            speed_text = stats.get("speed", "0.0")
-            cv2.putText(frame, speed_text,
-                        (hx + self.col_w[0] + self.col_w[1] + 8, y_offset),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 220, 100), 1, cv2.LINE_AA)
-
-            # Team
-            team_text = team if team != "—" else "—"
-            cv2.putText(frame, team_text,
-                        (hx + self.col_w[0] + self.col_w[1] + self.col_w[2] + 8, y_offset),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, team_color, 1, cv2.LINE_AA)
-
-            y_offset += self.row_h
-
-
-def load_csv(path: Path) -> dict[str, dict[str, str]]:
-    import csv
-    with path.open(newline="", encoding="utf-8") as f:
-        return {r.get("player_id", "").strip(): {k: v for k, v in r.items()}
-                for r in csv.DictReader(f) if r.get("player_id", "").strip()}
-
-
-def load_frame_index(path: str, gap: int = 30) -> dict[int, dict[str, tuple[int, int]]]:
-    with open(path, encoding="utf-8") as f:
-        players = json.load(f)["players"]
-
-    frames: dict[int, dict[str, tuple[int, int]]] = defaultdict(dict)
-    for pid, points in players.items():
-        dets = [(int(p["frame"]), int(p["center"][0]), int(p["center"][1])) for p in points]
-        dets.sort()
-        for f, x, y in dets:
-            frames[f][pid] = (x, y)
-        for (f0, x0, y0), (f1, x1, y1) in zip(dets, dets[1:]):
-            g = f1 - f0
-            if 1 < g <= gap:
-                for step in range(1, g):
-                    t = step / g
-                    frames[f0 + step].setdefault(pid, (round(x0 + t*(x1-x0)), round(y0 + t*(y1-y0))))
-    return frames
-
-
-_UNIT = {
-    "total_distance_m": "m", "total_distance_px": "px",
-    "avg_speed_m_s": "m/s", "avg_speed_px_s": "px/s",
-}
-
-
-def pick(row: dict, mk: str, pk: str) -> tuple[str, str]:
-    if row.get(mk):
-        return row[mk], _UNIT.get(mk, "m")
-    if row.get(pk):
-        return row[pk], _UNIT.get(pk, "px")
-    return "0", "px"
-
-
-def build_frame_scores(events: list[tuple[int, int]], total: int) -> dict[int, dict[int, int]]:
-    events = sorted(events, key=lambda x: x[0])
-    scores: dict[int, dict[int, int]] = {}
-    cur = {0: 0, 1: 0}
-    idx = 0
-    for f in range(total):
-        while idx < len(events) and events[idx][0] <= f:
-            cur[events[idx][1]] += 1
-            idx += 1
-        scores[f] = {0: cur[0], 1: cur[1]}
-    return scores
-
-
-def draw_score_banner(frame, w: int, scores: dict[int, int]):
-    h = 50
-    cv2.rectangle(frame, (0, 0), (w, h), (20, 20, 20), -1)
-    cv2.rectangle(frame, (0, 0), (w, h), (100, 100, 100), 2)
-    text = f"WHITE: {scores[0]}  |  BLUE: {scores[1]}"
-    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
-    cv2.putText(frame, text, (w//2 - tw//2, h//2 + th//2 - 3),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
-
-
-def run_visualization(
-    video_path: str,
-    traj_path: str,
-    dist_csv: Path,
-    speed_csv: Path,
-    out_path: str,
-    shots: list[ShotResult] | None = None,
-    shot_events: list[tuple[int, int]] | None = None,
-):
-    """Overlay dashboard + live score banner onto tracked video."""
-
-    frames_data = load_frame_index(traj_path)
-    dist_data   = load_csv(dist_csv)
-    speed_data  = load_csv(speed_csv)
-
-    # Load team info from trajectories
-    with open(traj_path, encoding="utf-8") as f:
-        traj_data = json.load(f)
-
-    # Build player team lookup (most common team per player)
-    player_teams: dict[str, str] = {}
-    for pid, records in traj_data.get("players", {}).items():
-        teams = [r.get("team") for r in records if r.get("team")]
-        if teams:
-            from collections import Counter
-            player_teams[pid] = Counter(teams).most_common(1)[0][0]
-
-    cap = cv2.VideoCapture(video_path)
-    fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
-
-    # Init dashboard
-    dashboard = PlayerDashboard(width, height, corner="top-right")
-
-    frame_scores = build_frame_scores(shot_events, total) if shot_events else {}
-    shot_frames: dict[int, list[int]] = defaultdict(list)
-    if shots:
-        for i, s in enumerate(shots, 1):
-            for f in range(s.arc_start_frame, min(s.arc_end_frame + 1, total)):
-                shot_frames[f].append(i)
-
-    fidx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # Build player stats for dashboard (only players visible this frame)
-        visible_players = []
-        for pid, (x, y) in frames_data.get(fidx, {}).items():
-            d_row = dist_data.get(pid, {})
-            s_row = speed_data.get(pid, {})
-
-            dist_val, d_unit = pick(d_row, "total_distance_m", "total_distance_px")
-            speed_val, s_unit = pick(s_row, "avg_speed_m_s", "avg_speed_px_s")
-
-            # Get team from trajectories
-            team = player_teams.get(pid, "—")
-
-            visible_players.append({
-                "id": pid,
-                "distance": f"{float(dist_val):.1f}{d_unit}",
-                "speed": f"{float(speed_val):.2f}{s_unit}",
-                "team": team,
-            })
-
-        # Sort by ID
-        visible_players.sort(key=lambda x: int(x["id"]))
-
-        # Draw dashboard
-        dashboard.draw(frame, visible_players)
-
-        # Shot flash
-        if fidx in shot_frames:
-            for sn in shot_frames[fidx]:
-                text = f"🏀 SHOT MADE #{sn}"
-                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
-                cx = width // 2
-                cv2.rectangle(frame, (cx-tw//2-20, 60), (cx+tw//2+20, 60+th+20), (0, 165, 255), -1)
-                cv2.putText(frame, text, (cx-tw//2, 60+th+5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
-
-        # Score banner
-        if frame_scores:
-            draw_score_banner(frame, width, frame_scores.get(fidx, {0: 0, 1: 0}))
-
-        writer.write(frame)
-        fidx += 1
-
-    cap.release()
-    writer.release()
-    print(f"\n🎬 Final video with dashboard → {out_path}")
-
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clip) -> list[tuple[int, int]]:
     """Assign each shot to a team and return (frame, team_idx) events."""
@@ -433,6 +124,10 @@ def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clip) -> list
         print(f"   Shot at frame {shot.arc_end_frame} → Team {TEAM_NAMES_SHORT[best_team]}")
     return events
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Main
+# ═════════════════════════════════════════════════════════════════════════════
 
 def main():
     print('🚀 Starting Basketball Analysis Pipeline...')
@@ -479,12 +174,11 @@ def main():
 
     shots = run_shot_detection(TRAJECTORIES_PATH, analytics_dir)
     shot_events = assign_shot_teams(shots, trajectories, tracker.clip)
-
     run_analytics(trajectories, fps, analytics_dir, METERS_PER_PIXEL, INCLUDE_REFEREES)
 
-    # Visualization
+    # Visualization (dashboard + score banner + shot flashes)
     final_output = str(Path(OUTPUT_PATH).parent / "final_output1.mp4")
-    run_visualization(
+    render_video(
         video_path=OUTPUT_PATH,
         traj_path=TRAJECTORIES_PATH,
         dist_csv=analytics_dir / "distance_report.csv",

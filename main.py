@@ -1,506 +1,328 @@
+"""
+main.py
+Orchestration layer: detection → tracking → shot detection → analytics → visualization.
+"""
+
+from __future__ import annotations
+
 import cv2
-import os
 import json
 import time
-import numpy as np
 import torch
-import scipy.linalg
 from pathlib import Path
 from collections import defaultdict
-import csv
 
-from detection.detector              import BasketballDetector
-from team_clustering.clusterer       import CLIPTeamClusterer
-from boxmot.trackers.botsort.botsort import BotSort
+from tracking.tracker import BasketballTracker, TEAM_NAMES_SHORT
 
 # ── Analytics modules ───────────────────────────────────────────────────────
 import sys
-analytics_dir = Path(__file__).parent / "analytics"
-if str(analytics_dir) not in sys.path:
-    sys.path.insert(0, str(analytics_dir.parent))
+_src = Path(__file__).parent / "src"
+if str(_src) not in sys.path:
+    sys.path.insert(0, str(_src))
 
 from src.analytics.distance import build_report as build_distance_report, export_csv as export_distance_csv
 from src.analytics.speed  import build_speed_report, export_csv as export_speed_csv
+from src.analytics.shot_detector import detect_shots, load_trajectory, ShotResult
 
-# ── Kalman stability patch ────────────────────────────────────────────────────
-from boxmot.motion.kalman_filters.base import BaseKalmanFilter
 
-def _stable_update_state(self, z, R=None, H=None):
-    _H = self._resolve_matrix(H, self.H)
-    _R = self._resolve_matrix(R, self.R)
-    if np.isscalar(_R):
-        _R = np.eye(self.dim_z) * float(_R)
-    projected_mean, projected_cov = self.project_state(H=_H, R=_R)
-    eps = 1e-6
-    while True:
-        try:
-            chol_factor, lower = scipy.linalg.cho_factor(
-                projected_cov, lower=True, check_finite=False)
-            break
-        except np.linalg.LinAlgError:
-            projected_cov += np.eye(projected_cov.shape[0]) * eps
-            eps *= 10
-            if eps > 1.0:
-                return self.x, self.P
-    self.K = scipy.linalg.cho_solve(
-        (chol_factor, lower), np.dot(self.P, _H.T).T, check_finite=False).T
-    self.y  = z.reshape(-1, 1)[:self.dim_z] - projected_mean
-    self.S  = projected_cov
-    self.SI = scipy.linalg.cho_solve(
-        (chol_factor, lower), np.eye(self.dim_z), check_finite=False)
-    self.x      = self.x + np.dot(self.K, self.y)
-    self.P      = self.P - np.linalg.multi_dot((self.K, projected_cov, self.K.T))
-    self.z      = z.reshape(-1, 1)[:self.dim_z].copy()
-    self.x_post = self.x.copy()
-    self.P_post = self.P.copy()
-    return self.x, self.P
+# ── Config ────────────────────────────────────────────────────────────────────
 
-BaseKalmanFilter.update_state = _stable_update_state
-# ─────────────────────────────────────────────────────────────────────────────
+VIDEO_PATH        = 'data/shooting3.mp4'
+MODEL_PATH        = 'models/weights/last.pt'
+OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_botsort2.mp4'
+TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
+REID_PATH         = 'osnet_x0_25_msmt17.pt'
+DEVICE            = torch.device('cuda:0')
 
-BALL_CLASS_ID = 0
-CLASS_NAMES   = {0: 'basketball', 1: 'net', 2: 'player', 3: 'referee'}
+METERS_PER_PIXEL = 0.0264
+INCLUDE_REFEREES = False
 
-TEAM_0_DESC = "a basketball player wearing a white jersey"
+TEAM_0_DESC = "a basketball player wearing a yellow jersey"
 TEAM_1_DESC = "a basketball player wearing a dark blue jersey"
 
-CLIP_REFRESH_EVERY = 15
 
-TEAM_BOX_COLORS = {
-    0: (255, 255, 255),
-    1: (0,   0,   255),
-}
-
-
-# ── ID Manager ────────────────────────────────────────────────────────────────
-
-class IDManager:
-    LIMITS     = {'player': 10, 'referee': 4, 'net': 2}
-    MAX_ABSENT = 60
-
-    def __init__(self):
-        self._map = {c: {} for c in self.LIMITS}
-        self._age = {c: {} for c in self.LIMITS}
-
-    def get_id(self, cls_name, ori_id):
-        if cls_name not in self.LIMITS:
-            return ori_id
-        m = self._map[cls_name]
-        if ori_id in m:
-            self._age[cls_name][ori_id] = 0
-            return m[ori_id]
-        free = self._next_free(cls_name)
-        if free is None:
-            return None
-        m[ori_id] = free
-        self._age[cls_name][ori_id] = 0
-        return free
-
-    def update_ages(self, active):
-        for cls_name in self.LIMITS:
-            seen = active.get(cls_name, set())
-            for ori_id in list(self._age[cls_name]):
-                if ori_id in seen:
-                    self._age[cls_name][ori_id] = 0
-                else:
-                    self._age[cls_name][ori_id] += 1
-                    if self._age[cls_name][ori_id] >= self.MAX_ABSENT:
-                        del self._map[cls_name][ori_id]
-                        del self._age[cls_name][ori_id]
-
-    def _next_free(self, cls_name):
-        used = set(self._map[cls_name].values())
-        for i in range(1, self.LIMITS[cls_name] + 1):
-            if i not in used:
-                return i
-        return None
-
-
-# ── Drawing ───────────────────────────────────────────────────────────────────
-
-def draw_box(frame, x1, y1, x2, y2, label, color):
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-    cv2.rectangle(frame, (x1, y1 - th - 8), (x1 + tw + 6, y1), color, -1)
-    cv2.putText(frame, label, (x1 + 3, y1 - 5),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2)
-
-
-# ── Trajectory helpers ────────────────────────────────────────────────────────
-
-def make_trajectory_record(frame_idx, x1, y1, x2, y2, extra=None):
-    record = {
-        "frame":  frame_idx,
-        "bbox":   [x1, y1, x2, y2],
-        "center": [int((x1 + x2) / 2), int((y1 + y2) / 2)],
-    }
-    if extra:
-        record.update(extra)
-    return record
-
+# ── I/O helpers ───────────────────────────────────────────────────────────────
 
 def save_trajectories(trajectories: dict, path: str):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, 'w') as f:
         json.dump(trajectories, f, indent=2)
     print(f'   Trajectories → {path}')
 
 
-# ── Analytics ───────────────────────────────────────────────────────────────────
+# ── Analytics ─────────────────────────────────────────────────────────────────
 
 def run_analytics(trajectories: dict, fps: float, analytics_dir: Path,
                   meters_per_pixel: float | None = None,
                   include_referees: bool = False):
-    """Compute and export distance & speed reports from trajectories."""
-    
-    # ── Distance report ─────────────────────────────────────────────────────
-    flat_trajectories: dict[str, list] = {}
-    for pid, pts in trajectories.get("players", {}).items():
-        flat_trajectories[pid] = pts
+    """Compute and export distance & speed reports."""
+
+    # Distance
+    flat = {pid: pts for pid, pts in trajectories.get("players", {}).items()}
     if include_referees:
         for rid, pts in trajectories.get("referees", {}).items():
-            flat_trajectories[f"ref_{rid}"] = pts
-    
-    distance_rows = build_distance_report(flat_trajectories, meters_per_pixel)
-    distance_path = analytics_dir / "distance_report.csv"
-    export_distance_csv(distance_rows, distance_path)
-    
-    # ── Speed report ─────────────────────────────────────────────────────────
-    speed_input: dict[str, list[list[float]]] = {}
-    for pid, records in trajectories.get("players", {}).items():
-        speed_input[pid] = [
-            [r["center"][0], r["center"][1], float(r["frame"])]
-            for r in records
-        ]
-    
-    speed_rows = build_speed_report(speed_input, fps=fps, meters_per_pixel=meters_per_pixel)
-    speed_path = analytics_dir / "speed_report.csv"
-    export_speed_csv(speed_rows, speed_path)
-    
+            flat[f"ref_{rid}"] = pts
+
+    export_distance_csv(
+        build_distance_report(flat, meters_per_pixel),
+        analytics_dir / "distance_report.csv"
+    )
+
+    # Speed
+    speed_input = {
+        pid: [[r["center"][0], r["center"][1], float(r["frame"])] for r in recs]
+        for pid, recs in trajectories.get("players", {}).items()
+    }
+    export_speed_csv(
+        build_speed_report(speed_input, fps=fps, meters_per_pixel=meters_per_pixel),
+        analytics_dir / "speed_report.csv"
+    )
+
     print(f"\n📊 Analytics saved to {analytics_dir}/")
+
+
+def run_shot_detection(trajectories_path: str, analytics_dir: Path) -> list[ShotResult]:
+    """Detect made shots from ball trajectory."""
+    points, hoop = load_trajectory(trajectories_path)
+    shots = detect_shots(points, hoop)
+
+    records = [
+        {
+            "shot": i,
+            "frames": f"{s.arc_start_frame}–{s.arc_end_frame}",
+            "apex_frame": s.apex_frame,
+            "entry": {"x": s.entry_x, "y": s.entry_y},
+            "confidence": s.confidence,
+        }
+        for i, s in enumerate(shots, 1)
+    ]
+
+    shots_path = analytics_dir / "shots.json"
+    with shots_path.open("w", encoding="utf-8") as f:
+        json.dump({"made_shots": records, "hoop": {"x": hoop.x, "y": hoop.y, "radius": hoop.radius}}, f, indent=2)
+
+    print(f"\n🏀 Shot Detection: {len(shots)} made shot(s)")
+    for rec in records:
+        print(f"   Shot {rec['shot']}: frames {rec['frames']}  apex@{rec['apex_frame']}  conf={rec['confidence']:.2f}")
+
+    return shots
 
 
 # ── Visualization ─────────────────────────────────────────────────────────────
 
-def load_csv(path: str) -> dict[str, dict[str, str]]:
-    """Parse a CSV into {player_id: {column: value}} dict."""
-    result = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            pid = row.get("player_id", "").strip()
-            if pid:
-                result[pid] = {k.strip(): v.strip() for k, v in row.items()}
-    return result
+def load_csv(path: Path) -> dict[str, dict[str, str]]:
+    import csv
+    with path.open(newline="", encoding="utf-8") as f:
+        return {r.get("player_id", "").strip(): {k: v for k, v in r.items()}
+                for r in csv.DictReader(f) if r.get("player_id", "").strip()}
 
 
-def load_frame_index(path: str, gap_threshold: int = 30) -> dict[int, dict[str, tuple[int, int]]]:
-    """Build frame-indexed lookup with linear interpolation across tracking gaps."""
+def load_frame_index(path: str, gap: int = 30) -> dict[int, dict[str, tuple[int, int]]]:
     with open(path, encoding="utf-8") as f:
-        players: dict[str, list] = json.load(f)["players"]
+        players = json.load(f)["players"]
 
     frames: dict[int, dict[str, tuple[int, int]]] = defaultdict(dict)
-
     for pid, points in players.items():
-        detections: list[tuple[int, int, int]] = []
-        for point in points:
-            try:
-                frame = int(point["frame"])
-                x, y = point["center"]
-                detections.append((frame, int(x), int(y)))
-            except (TypeError, IndexError, ValueError):
-                continue
-
-        if not detections:
-            continue
-
-        detections.sort()
-
-        for frame, x, y in detections:
-            frames[frame][pid] = (x, y)
-
-        for (f0, x0, y0), (f1, x1, y1) in zip(detections, detections[1:]):
-            gap = f1 - f0
-            if gap <= 1 or gap > gap_threshold:
-                continue
-            for step in range(1, gap):
-                t = step / gap
-                xi = round(x0 + t * (x1 - x0))
-                yi = round(y0 + t * (y1 - y0))
-                frames[f0 + step].setdefault(pid, (xi, yi))
-
+        dets = [(int(p["frame"]), int(p["center"][0]), int(p["center"][1])) for p in points]
+        dets.sort()
+        for f, x, y in dets:
+            frames[f][pid] = (x, y)
+        for (f0, x0, y0), (f1, x1, y1) in zip(dets, dets[1:]):
+            g = f1 - f0
+            if 1 < g <= gap:
+                for step in range(1, g):
+                    t = step / g
+                    frames[f0 + step].setdefault(pid, (round(x0 + t*(x1-x0)), round(y0 + t*(y1-y0))))
     return frames
 
 
-_UNIT_MAP: dict[str, str] = {
-    "total_distance_m":  "m",
-    "total_distance_px": "px",
-    "avg_speed_m_s":     "m/s",
-    "avg_speed_px_s":    "px/s",
+_UNIT = {
+    "total_distance_m": "m", "total_distance_px": "px",
+    "avg_speed_m_s": "m/s", "avg_speed_px_s": "px/s",
 }
 
 
-def pick(row: dict[str, str], metric_key: str, pixel_key: str) -> tuple[str, str]:
-    """Return (value, display_unit) preferring metric, falling back to pixels."""
-    if metric_key in row and row[metric_key]:
-        return row[metric_key], _UNIT_MAP.get(metric_key, "m")
-    if pixel_key in row and row[pixel_key]:
-        return row[pixel_key], _UNIT_MAP.get(pixel_key, "px")
+def pick(row: dict, mk: str, pk: str) -> tuple[str, str]:
+    if row.get(mk):
+        return row[mk], _UNIT.get(mk, "m")
+    if row.get(pk):
+        return row[pk], _UNIT.get(pk, "px")
     return "0", "px"
+
+
+def build_frame_scores(events: list[tuple[int, int]], total: int) -> dict[int, dict[int, int]]:
+    events = sorted(events, key=lambda x: x[0])
+    scores: dict[int, dict[int, int]] = {}
+    cur = {0: 0, 1: 0}
+    idx = 0
+    for f in range(total):
+        while idx < len(events) and events[idx][0] <= f:
+            cur[events[idx][1]] += 1
+            idx += 1
+        scores[f] = {0: cur[0], 1: cur[1]}
+    return scores
+
+
+def draw_banner(frame, w: int, scores: dict[int, int]):
+    h = 50
+    cv2.rectangle(frame, (0, 0), (w, h), (20, 20, 20), -1)
+    cv2.rectangle(frame, (0, 0), (w, h), (100, 100, 100), 2)
+    text = f"WHITE: {scores[0]}  |  BLUE: {scores[1]}"
+    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+    cv2.putText(frame, text, (w//2 - tw//2, h//2 + th//2 - 3),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
 
 
 def run_visualization(
     video_path: str,
-    trajectories_path: str,
-    distance_csv: str,
-    speed_csv: str,
-    output_path: str,
-) -> None:
-    """Overlay tracked player statistics (distance & speed) onto the tracked video."""
-    
-    frames_data = load_frame_index(trajectories_path)
-    dist_data   = load_csv(distance_csv)
+    traj_path: str,
+    dist_csv: Path,
+    speed_csv: Path,
+    out_path: str,
+    shots: list[ShotResult] | None = None,
+    shot_events: list[tuple[int, int]] | None = None,
+):
+    frames_data = load_frame_index(traj_path)
+    dist_data   = load_csv(dist_csv)
     speed_data  = load_csv(speed_csv)
 
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise FileNotFoundError(f"Cannot open video: {video_path}")
-
     fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
     width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
-    frame_idx = 0
+    frame_scores = build_frame_scores(shot_events, total) if shot_events else {}
+    shot_frames: dict[int, list[int]] = defaultdict(list)
+    if shots:
+        for i, s in enumerate(shots, 1):
+            for f in range(s.arc_start_frame, min(s.arc_end_frame + 1, total)):
+                shot_frames[f].append(i)
+
+    fidx = 0
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        for pid, (x, y) in frames_data.get(frame_idx, {}).items():
-            d_row = dist_data.get(pid, {})
-            s_row = speed_data.get(pid, {})
+        # Player stats
+        for pid, (x, y) in frames_data.get(fidx, {}).items():
+            d, du = pick(dist_data.get(pid, {}), "total_distance_m", "total_distance_px")
+            s, su = pick(speed_data.get(pid, {}), "avg_speed_m_s", "avg_speed_px_s")
+            text = f"D: {float(d):.1f}{du} | S: {float(s):.2f}{su}"
+            cv2.putText(frame, text, (max(5, min(x-120, width-350)), max(30, y-60)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
 
-            dist,  d_unit = pick(d_row, "total_distance_m",  "total_distance_px")
-            speed, s_unit = pick(s_row, "avg_speed_m_s",     "avg_speed_px_s")
+        # Shot flash
+        if fidx in shot_frames:
+            for sn in shot_frames[fidx]:
+                text = f"🏀 SHOT MADE #{sn}"
+                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)
+                cx = width // 2
+                cv2.rectangle(frame, (cx-tw//2-20, 60), (cx+tw//2+20, 60+th+20), (0, 165, 255), -1)
+                cv2.putText(frame, text, (cx-tw//2, 60+th+5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3, cv2.LINE_AA)
 
-            text = f"D: {float(dist):.1f}{d_unit} | S: {float(speed):.2f}{s_unit}"
-            label_x = max(5, min(x - 120, frame.shape[1] - 350))
-            label_y = max(30, y - 60)
-
-            cv2.putText(
-                frame,
-                text,
-                (label_x, label_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 255),
-                2,
-                cv2.LINE_AA
-            )
+        # Score banner
+        if frame_scores:
+            draw_banner(frame, width, frame_scores.get(fidx, {0: 0, 1: 0}))
 
         writer.write(frame)
-        frame_idx += 1
+        fidx += 1
 
     cap.release()
     writer.release()
-    print(f"\n🎬 Final video with stats → {output_path}")
+    print(f"\n🎬 Final video → {out_path}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clip) -> list[tuple[int, int]]:
+    """Assign each shot to a team and return (frame, team_idx) events."""
+    events = []
+    for shot in shots:
+        best_team, best_dist = 0, float('inf')
+        for pid_str, records in trajectories.get("players", {}).items():
+            for rec in records:
+                if abs(rec["frame"] - shot.apex_frame) < 5:
+                    px, py = rec["center"]
+                    dist = ((px - shot.entry_x) ** 2 + (py - shot.entry_y) ** 2) ** 0.5
+                    if dist < best_dist and rec.get("team"):
+                        best_dist = dist
+                        best_team = 0 if rec["team"] == clip.TEAM_NAMES[0] else 1
+        events.append((shot.arc_end_frame, best_team))
+        print(f"   Shot at frame {shot.arc_end_frame} → Team {TEAM_NAMES_SHORT[best_team]}")
+    return events
+
+
 def main():
-    # ── Configuration ───────────────────────────────────────────────────────
-    video_path        = 'data/video_2.mp4'
-    model_path        = 'models/weights/last.pt'
-    output_path       = 'runs/bot-sort tracking/tracking_botsort.mp4'
-    trajectories_path = 'runs/bot-sort tracking/analytics/trajectories.json'
-    reid_path         = 'osnet_x0_25_msmt17.pt'
-    device            = torch.device('cuda:0')
-    
-    # Analytics config
-    meters_per_pixel = 0.0264
-    include_referees = False
+    print('🚀 Starting Basketball Analysis Pipeline...')
 
-    os.makedirs('runs', exist_ok=True)
-
-    detector   = BasketballDetector(model_path)
-    id_manager = IDManager()
-    clip       = CLIPTeamClusterer(team_0_desc=TEAM_0_DESC, team_1_desc=TEAM_1_DESC)
-
-    tracker = BotSort(
-        reid_weights      = Path(reid_path),
-        device            = device,
-        half              = True,
-        track_high_thresh = 0.30,
-        track_low_thresh  = 0.10,
-        new_track_thresh  = 0.40,
-        track_buffer      = 120,
-        match_thresh      = 0.80,
-        proximity_thresh  = 0.50,
-        appearance_thresh = 0.40,
-        cmc_method        = 'ecc',
-        frame_rate        = 30,
-        with_reid         = True,
-        min_hits          = 1,
+    # Init tracker
+    tracker = BasketballTracker(
+        model_path=MODEL_PATH,
+        reid_path=REID_PATH,
+        device=DEVICE,
+        team_0_desc=TEAM_0_DESC,
+        team_1_desc=TEAM_1_DESC,
     )
 
-    cap = cv2.VideoCapture(video_path)
+    # Open video
+    cap = cv2.VideoCapture(VIDEO_PATH)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    writer = cv2.VideoWriter(
-        output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h)
-    )
+    writer = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
 
-    print('🚀 Starting BoT-SORT + CLIP Team Classification...')
-
-    # ── trajectory accumulators ───────────────────────────────────────────────
-    trajectories = {
-        "players":  defaultdict(list),
-        "referees": defaultdict(list),
-        "net":      defaultdict(list),
-        "ball":     [],
-    }
-
-    frame_count = 0
-    team_cache: dict[int, tuple[int, int]] = {}
+    # Process frames
     t0 = time.time()
-
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        # ── 1. Detect ──────────────────────────────────────────────────────
-        results = detector.model.predict(frame, conf=0.3, verbose=False)[0]
-
-        ball_boxes   = []
-        tracker_dets = []
-
-        for box in results.boxes:
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            conf   = float(box.conf[0].cpu().numpy())
-            cls_id = int(box.cls[0].cpu().numpy())
-            if cls_id == BALL_CLASS_ID:
-                ball_boxes.append((int(x1), int(y1), int(x2), int(y2), conf))
-            else:
-                tracker_dets.append([x1, y1, x2, y2, conf, float(cls_id)])
-
-        dets   = (np.array(tracker_dets, dtype=float)
-                  if tracker_dets else np.empty((0, 6)))
-
-        # ── 2. Track ───────────────────────────────────────────────────────
-        tracks = tracker.update(dets, frame)
-
-        # ── 3. IDs + CLIP + draw + record trajectories ─────────────────────
-        active: dict[str, set] = {}
-
-        for track in tracks:
-            x1, y1, x2, y2, ori_id, conf, cls_idx = track[:7]
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            cls_name = CLASS_NAMES.get(int(cls_idx), 'unknown')
-            ori_id   = int(ori_id)
-
-            custom_id = id_manager.get_id(cls_name, ori_id)
-            if custom_id is None:
-                continue
-
-            active.setdefault(cls_name, set()).add(ori_id)
-
-            color = detector.colors.get(cls_name, (255, 255, 255))
-            label = f'{cls_name} {custom_id}'
-            team_name = None
-
-            if cls_name == 'player':
-                cached       = team_cache.get(ori_id)
-                needs_update = (cached is None or
-                                (frame_count - cached[1]) >= CLIP_REFRESH_EVERY)
-                if needs_update:
-                    try:
-                        team_idx = clip.predict(frame, x1, y1, x2, y2)
-                        team_cache[ori_id] = (team_idx, frame_count)
-                    except Exception:
-                        team_idx = cached[0] if cached else None
-                else:
-                    team_idx = cached[0]
-
-                if team_idx is not None:
-                    color     = TEAM_BOX_COLORS[team_idx]
-                    team_name = clip.TEAM_NAMES[team_idx]
-                    label     = f'{team_name} {custom_id}'
-
-                record = make_trajectory_record(
-                    frame_count, x1, y1, x2, y2,
-                    extra={"team": team_name} if team_name else None
-                )
-                trajectories["players"][str(custom_id)].append(record)
-
-            elif cls_name == 'referee':
-                trajectories["referees"][str(custom_id)].append(
-                    make_trajectory_record(frame_count, x1, y1, x2, y2)
-                )
-
-            elif cls_name == 'net':
-                trajectories["net"][str(custom_id)].append(
-                    make_trajectory_record(frame_count, x1, y1, x2, y2)
-                )
-
-            draw_box(frame, x1, y1, x2, y2, label, color)
-
-        id_manager.update_ages(active)
-
-        # ── 4. Ball ────────────────────────────────────────────────────────
-        if ball_boxes:
-            x1, y1, x2, y2, _ = max(ball_boxes, key=lambda b: b[4])
-            draw_box(frame, x1, y1, x2, y2,
-                     'basketball', detector.colors['basketball'])
-            trajectories["ball"].append(
-                make_trajectory_record(frame_count, x1, y1, x2, y2)
-            )
-
+        frame = tracker.process_frame(frame)
         writer.write(frame)
-        frame_count += 1
-        if frame_count % 50 == 0:
-            print(f'Frame {frame_count}  |  '
-                  f'{frame_count / (time.time() - t0):.1f} FPS')
 
-    # ── Save ───────────────────────────────────────────────────────────────
+        if tracker.frame_count % 50 == 0:
+            print(f'Frame {tracker.frame_count}  |  '
+                  f'{tracker.frame_count / (time.time() - t0):.1f} FPS')
+
     cap.release()
     writer.release()
 
-    trajectories["players"]  = dict(trajectories["players"])
-    trajectories["referees"] = dict(trajectories["referees"])
-    trajectories["net"]      = dict(trajectories["net"])
+    # Save trajectories
+    trajectories = tracker.get_trajectories()
+    save_trajectories(trajectories, TRAJECTORIES_PATH)
 
-    save_trajectories(trajectories, trajectories_path)
+    # Analytics pipeline
+    analytics_dir = Path(TRAJECTORIES_PATH).parent
 
-    # ── Analytics ──────────────────────────────────────────────────────────
-    analytics_dir = Path(trajectories_path).parent
-    run_analytics(
-        trajectories=trajectories,
-        fps=fps,
-        analytics_dir=analytics_dir,
-        meters_per_pixel=meters_per_pixel,
-        include_referees=include_referees,
-    )
+    shots = run_shot_detection(TRAJECTORIES_PATH, analytics_dir)
+    shot_events = assign_shot_teams(shots, trajectories, tracker.clip)
 
-    # ── Visualization ────────────────────────────────────────────────────────
-    final_output = str(Path(output_path).parent / "final_output.mp4")
+    run_analytics(trajectories, fps, analytics_dir, METERS_PER_PIXEL, INCLUDE_REFEREES)
+
+    # Visualization
+    final_output = str(Path(OUTPUT_PATH).parent / "final_output.mp4")
     run_visualization(
-        video_path=output_path,
-        trajectories_path=trajectories_path,
-        distance_csv=str(analytics_dir / "distance_report.csv"),
-        speed_csv=str(analytics_dir / "speed_report.csv"),
-        output_path=final_output,
+        video_path=OUTPUT_PATH,
+        traj_path=TRAJECTORIES_PATH,
+        dist_csv=analytics_dir / "distance_report.csv",
+        speed_csv=analytics_dir / "speed_report.csv",
+        out_path=final_output,
+        shots=shots,
+        shot_events=shot_events,
     )
 
     elapsed = time.time() - t0
-    print(f'\n✅ Done — {frame_count} frames in {elapsed:.1f}s '
-          f'({frame_count / elapsed:.1f} FPS avg)')
-    print(f'   Tracked video  → {output_path}')
-    print(f'   Final video    → {final_output}')
+    print(f'\n✅ Done — {tracker.frame_count} frames in {elapsed:.1f}s '
+          f'({tracker.frame_count / elapsed:.1f} FPS avg)')
+    print(f'   Tracked video → {OUTPUT_PATH}')
+    print(f'   Final video   → {final_output}')
 
 
 if __name__ == '__main__':

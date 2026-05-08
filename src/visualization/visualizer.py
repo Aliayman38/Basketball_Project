@@ -198,8 +198,8 @@ def process_video(args: argparse.Namespace) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Overlay player stats onto video.")
-    p.add_argument("--video",        default="out.mp4",                       help="Input video file")
-    p.add_argument("--trajectories", default="runs/detect/trajectories.json", help="Trajectories JSON")
+    p.add_argument("--video",        default="Basketball_Project/runs/bot-sort tracking/tracking_botsort.mp4",                       help="Input video file")
+    p.add_argument("--trajectories", default="Basketball_Project/runs/bot-sort tracking/analytics/trajectories.json", help="Trajectories JSON")
     p.add_argument("--distance-csv", default="runs/detect/distance_report.csv", help="Distance CSV")
     p.add_argument("--speed-csv",    default="runs/detect/speed_report.csv",  help="Speed CSV")
     p.add_argument("--output",       default="final_output.mp4",              help="Output video path")

@@ -4,30 +4,18 @@ Detect made basketball shot attempts from ball trajectory data.
 
 Research-backed approach:
   1. Segment trajectory into candidate shot arcs (parabolic shape with clear apex).
-  2. For each arc, check geometric conditions relative to the hoop:
-       a) Ball passes ABOVE the hoop rim (entry angle requirement).
-       b) Ball crosses the hoop plane top-to-bottom (descent through rim).
-       c) Ball centre passes within the rim cylinder (not a near-miss).
-       d) Ball exits BELOW the hoop after crossing (confirms through-net travel).
-  3. Enforce a minimum arc height and downward velocity at hoop crossing
-     to reject rim disturbances and flat passes that brush the net.
+  2. For each arc, check geometric conditions relative to the hoop.
+  3. Enforce minimum arc height and downward velocity at hoop crossing.
 
 Input JSON format:
 {
   "hoop": {"x": 940, "y": 360, "radius": 45},
-  "ball": [
-    {"frame": 51, "center": [365, 183]},
-    ...
-  ],
-  "net": {
-    "1": [{"frame": 64, "bbox": [...], "center": [865, 181]}, ...]
-  }
+  "ball": [{"frame": 51, "center": [365, 183]}, ...],
+  "net": {"1": [{"frame": 64, "bbox": [...], "center": [865, 181]}, ...]}
 }
 
 "hoop" may be derived automatically from "net" detections if absent.
 All coordinates are in image-pixel space (y increases downward).
-
-Preprocessing pipeline:  load_trajectory -> interpolate_gaps -> detect_shots
 """
 
 from __future__ import annotations
@@ -39,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+__all__ = ["detect_shots", "load_trajectory", "ShotResult", "Point", "Hoop"]
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -49,6 +39,7 @@ class Point:
     frame: int
     x: float
     y: float
+    interpolated: bool = False  # ← FIXED: proper field instead of dynamic hack
 
 
 @dataclass
@@ -70,7 +61,6 @@ class Hoop:
 
 @dataclass
 class ShotResult:
-    made: bool
     arc_start_frame: int
     arc_end_frame: int
     apex_frame: int
@@ -87,13 +77,14 @@ def _hoop_from_net(net: dict) -> Optional[Hoop]:
     """
     Derive a Hoop from net detections when no explicit 'hoop' key exists.
     Averages all net-centre detections across all tracked net IDs.
-    Rim radius is estimated as half the mean bbox width.
+    Rim radius = half the mean bbox width (removed erroneous *3 multiplier).
     """
     xs, ys, radii = [], [], []
     for detections in net.values():
         for d in detections:
             cx, cy = float(d["center"][0]), float(d["center"][1])
-            xs.append(cx); ys.append(cy)
+            xs.append(cx)
+            ys.append(cy)
             if "bbox" in d and len(d["bbox"]) == 4:
                 radii.append((float(d["bbox"][2]) - float(d["bbox"][0])) / 2.0)
     if not xs:
@@ -101,7 +92,7 @@ def _hoop_from_net(net: dict) -> Optional[Hoop]:
     return Hoop(
         x=sum(xs) / len(xs),
         y=sum(ys) / len(ys),
-        radius=(sum(radii) / len(radii)) *3 if radii else 45.0,
+        radius=(sum(radii) / len(radii)) if radii else 45.0,  # ← FIXED: removed *3
     )
 
 
@@ -167,20 +158,7 @@ def interpolate_gaps(
       - Scan consecutive known detections for frame gaps.
       - If gap size <= max_gap: synthesise intermediate Points by linearly
         interpolating (x, y) between the two anchor detections.
-      - If gap > max_gap: leave it empty — interpolating across a large
-        unknown region creates unrealistic trajectories and raises FP rate.
-
-    Interpolated points carry an `interpolated=True` attribute so downstream
-    code can distinguish real from synthetic detections if needed.
-
-    Parameters
-    ----------
-    points  : sorted list of real detections (no duplicate frames assumed)
-    max_gap : maximum consecutive missing frames to fill (default: 3)
-
-    Returns
-    -------
-    New sorted list with synthetic points inserted; original points unchanged.
+      - If gap > max_gap: leave it empty.
     """
     if len(points) < 2:
         return list(points)
@@ -197,9 +175,8 @@ def interpolate_gaps(
                 t  = step / (gap + 1)           # normalised position in (0, 1)
                 ix = p1.x + t * (p2.x - p1.x)
                 iy = p1.y + t * (p2.y - p1.y)
-                synthetic = Point(frame=p1.frame + step, x=round(ix, 2), y=round(iy, 2))
-                synthetic.interpolated = True   # type: ignore[attr-defined]
-                filled.append(synthetic)
+                filled.append(Point(frame=p1.frame + step, x=round(ix, 2),
+                                    y=round(iy, 2), interpolated=True))  # ← FIXED
         # Gaps > max_gap: intentionally left empty
 
     filled.append(points[-1])
@@ -227,7 +204,6 @@ def segment_arcs(
     ascending (a new shot launched). Each arc must:
       - contain at least `min_arc_len` points
       - have an apex at least `apex_height_px` above its start/end y
-        (rejects flat passes and rim deflections)
     """
     if len(points) < min_arc_len:
         return []
@@ -298,12 +274,7 @@ def _ball_passes_through_hoop(
             if entry_x is None:
                 continue
             lateral_err = abs(entry_x - hoop.x)
-            print(
-                f"frame={p2.frame} | "
-                f"entry_x={entry_x:.1f} | "
-                f"hoop_x={hoop.x:.1f} | "
-                f"error={lateral_err:.1f}"
-)
+            # ← FIXED: removed debug print
             if lateral_err <= hoop.radius * 1.8:
                 dy_px_per_frame = p2.y - p1.y   # downward speed at crossing
                 return True, entry_x, hoop.y, dy_px_per_frame
@@ -341,7 +312,7 @@ def _compute_confidence(
     Score 0–1 based on lateral accuracy and descent speed.
     Centre swish = 1.0; rim-scraper with slow descent ≈ 0.3.
     """
-    lateral_score = 1.0 - (lateral_err / hoop_radius)
+    lateral_score = max(0.0, 1.0 - (lateral_err / hoop_radius))  # ← FIXED: clamp early
     speed_score   = min(vert_speed / (min_speed * 3), 1.0)
     return round(max(0.0, min(1.0, 0.6 * lateral_score + 0.4 * speed_score)), 3)
 
@@ -355,7 +326,8 @@ def detect_shots(
     hoop: Hoop,
     min_arc_len: int = 8,
     apex_height_px: float = 20.0,
-    min_descent_speed: float = 1.0,
+    min_descent_speed: float = 3.0,  # ← FIXED: aligned with CLI default
+    min_frames_between_shots: int = 30,  # ← NEW: prevent duplicate detections
 ) -> list[ShotResult]:
     """
     Analyse a full-game trajectory and return a list of shot results.
@@ -367,21 +339,21 @@ def detect_shots(
     min_arc_len       : minimum frames for a valid shot arc
     apex_height_px    : minimum apex-to-endpoint height to qualify as a shot
     min_descent_speed : minimum px/frame downward velocity at rim crossing
-                        (rejects flat rim rolls that slowly drop in)
+    min_frames_between_shots : cooldown between shot detections (default: 30)
 
     Returns
     -------
-    List of ShotResult (made=True only for confirmed baskets).
+    List of ShotResult (only confirmed made shots).
     """
     # Preprocessing: fill small tracking gaps before arc analysis
     points = interpolate_gaps(points, max_gap=3)
     arcs = segment_arcs(points, min_arc_len, apex_height_px)
     results: list[ShotResult] = []
+    last_shot_end = -999
 
     for arc in arcs:
         # Reject arcs too far from hoop horizontally
         arc_center_x = sum(p.x for p in arc) / len(arc)
-
         if abs(arc_center_x - hoop.x) > 200:
             continue
         apex_idx = _find_apex(arc)
@@ -392,30 +364,22 @@ def detect_shots(
 
         # Gate 2: ball must cross the hoop plane within the rim cylinder
         passes, entry_x, entry_y, vert_speed = _ball_passes_through_hoop(arc, hoop)
-        passes , entry_x, entry_y, vert_speed = _ball_passes_through_hoop(arc, hoop)
+        # ← FIXED: single call, no duplicate
 
-# Fallback heuristic:
-# If ball gets close to hoop while descending,
-# and tracking disappears near the rim,
-# consider it a possible made shot.
+        # Fallback heuristic: ball near hoop while descending, tracking lost
         if not passes:
-
             last_point = arc[-1]
-
-            descending = arc[-1].y > arc[0].y
-
-            if (
-                abs(last_point.x - hoop.x) < 120
-                and last_point.y < hoop.y + 50
-                and descending
-            ):
+            apex_y = arc[apex_idx].y
+            descending = last_point.y > apex_y  # ← FIXED: compare to apex, not start
+            if (abs(last_point.x - hoop.x) < 120
+                    and last_point.y < hoop.y + 50
+                    and descending):
                 passes = True
                 entry_x = last_point.x
                 entry_y = last_point.y
                 vert_speed = 5.0
-
             else:
-                 continue
+                continue
 
         # Gate 3: descent speed must exceed threshold (avoids slow rim rolls)
         if vert_speed < min_descent_speed:
@@ -425,11 +389,14 @@ def detect_shots(
         if not _ball_exits_below_hoop(arc, hoop):
             continue
 
+        # Gate 5: minimum spacing between shots (prevents duplicate detections)
+        if arc[0].frame - last_shot_end < min_frames_between_shots:
+            continue
+
         lateral_err = abs(entry_x - hoop.x)
         confidence  = _compute_confidence(lateral_err, hoop.radius, vert_speed)
 
         results.append(ShotResult(
-            made=True,
             arc_start_frame=arc[0].frame,
             arc_end_frame=arc[-1].frame,
             apex_frame=arc[apex_idx].frame,
@@ -437,6 +404,7 @@ def detect_shots(
             entry_y=round(entry_y, 2),
             confidence=confidence,
         ))
+        last_shot_end = arc[-1].frame
 
     return results
 
@@ -454,6 +422,7 @@ def main() -> None:
     parser.add_argument("--min-arc-len",       type=int,   default=8,    help="Min frames per arc (default: 8)")
     parser.add_argument("--apex-height",        type=float, default=40.0, help="Min apex height in px (default: 40)")
     parser.add_argument("--min-descent-speed",  type=float, default=3.0,  help="Min px/frame descent at rim (default: 3)")
+    parser.add_argument("--min-shot-spacing",   type=int,   default=30,   help="Min frames between shots (default: 30)")
     args = parser.parse_args()
 
     try:
@@ -467,6 +436,7 @@ def main() -> None:
         min_arc_len=args.min_arc_len,
         apex_height_px=args.apex_height,
         min_descent_speed=args.min_descent_speed,
+        min_frames_between_shots=args.min_shot_spacing,
     )
 
     print(f"\nDetected {len(shots)} made shot(s):\n")

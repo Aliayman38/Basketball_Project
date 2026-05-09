@@ -23,6 +23,14 @@ if str(_src) not in sys.path:
 from src.analytics.distance import build_report as build_distance_report, export_csv as export_distance_csv
 from src.analytics.speed  import build_speed_report, export_csv as export_speed_csv
 from src.analytics.shot_detector import detect_shots, load_trajectory, ShotResult
+from src.analytics.possession import (
+    build_possession_report,
+    export_possession_csv,
+    export_possession_json,
+    print_possession_summary,
+    get_possession_by_frame,
+)
+from src.analytics.possession_overlay import render_possession_video
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -41,6 +49,10 @@ INCLUDE_REFEREES = False
 
 TEAM_0_DESC = "a basketball player wearing a yellow jersey"
 TEAM_1_DESC = "a basketball player wearing a dark blue jersey"
+
+# ── Possession Config ─────────────────────────────────────────────────────────
+BALL_POSSESSION_THRESHOLD = 80.0      # pixels: max distance ball→player center
+POSSESSION_MIN_FRAMES     = 3         # debounce: frames to confirm change
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -125,6 +137,32 @@ def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clip) -> list
     return events
 
 
+def run_possession(trajectories: dict, fps: float, analytics_dir: Path,
+                   team_names: tuple[str, str] = ("Team 0", "Team 1")) -> dict:
+    """
+    Compute and export ball possession analytics.
+    Returns possession_by_frame dict for visualization.
+    """
+    print("\n🏀 Running Possession Analysis...")
+
+    report = build_possession_report(
+        trajectories,
+        ball_threshold=BALL_POSSESSION_THRESHOLD,
+        min_consecutive_frames=POSSESSION_MIN_FRAMES,
+        team_names=team_names,
+    )
+
+    # Export
+    export_possession_csv(report, analytics_dir / "possession_report.csv")
+    export_possession_json(report, analytics_dir / "possession_report.json")
+
+    # Console summary
+    print_possession_summary(report, fps=fps)
+
+    # Return frame lookup for visualization
+    return get_possession_by_frame(report)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  Main
 # ═════════════════════════════════════════════════════════════════════════════
@@ -176,10 +214,28 @@ def main():
     shot_events = assign_shot_teams(shots, trajectories, tracker.clip)
     run_analytics(trajectories, fps, analytics_dir, METERS_PER_PIXEL, INCLUDE_REFEREES)
 
+    # ── Ball Possession ─────────────────────────────────────────────────────
+    team_names = (
+        tracker.clip.TEAM_NAMES[0] if hasattr(tracker.clip, 'TEAM_NAMES') else "Team 0",
+        tracker.clip.TEAM_NAMES[1] if hasattr(tracker.clip, 'TEAM_NAMES') else "Team 1",
+    )
+    possession_by_frame = run_possession(trajectories, fps, analytics_dir, team_names=team_names)
+
+    # ── Possession Visualization ────────────────────────────────────────────
+    print("\n🎨 Rendering possession highlights...")
+    possession_video_path = str(Path(OUTPUT_PATH).parent / "tracking_possession.mp4")
+    render_possession_video(
+        input_video_path=OUTPUT_PATH,
+        output_video_path=possession_video_path,
+        trajectories=trajectories,
+        possession_by_frame=possession_by_frame,
+        fps=fps,
+    )
+
     # Visualization (dashboard + score banner + shot flashes)
     final_output = str(Path(OUTPUT_PATH).parent / "final_output1.mp4")
     render_video(
-        video_path=OUTPUT_PATH,
+        video_path=possession_video_path,  # Use possession video as input
         traj_path=TRAJECTORIES_PATH,
         dist_csv=analytics_dir / "distance_report.csv",
         speed_csv=analytics_dir / "speed_report.csv",
@@ -191,8 +247,9 @@ def main():
     elapsed = time.time() - t0
     print(f'\n✅ Done — {tracker.frame_count} frames in {elapsed:.1f}s '
           f'({tracker.frame_count / elapsed:.1f} FPS avg)')
-    print(f'   Tracked video → {OUTPUT_PATH}')
-    print(f'   Final video   → {final_output}')
+    print(f'   Tracked video      → {OUTPUT_PATH}')
+    print(f'   Possession video   → {possession_video_path}')
+    print(f'   Final video        → {final_output}')
 
 
 if __name__ == '__main__':

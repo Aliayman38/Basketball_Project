@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -59,6 +60,10 @@ def draw_landmarks(frame, keypoints, radius=8, show_indices=True):
 def render_landmarks_video(input_video_path, output_video_path,
                            weights_path="models/weights/court_kp.pt",
                            conf_threshold=0.30, log_every=30):
+    """
+    Standalone renderer (kept for backward compatibility).
+    Use run_landmarks() below for pipeline integration.
+    """
     print(f"[Landmarks] Loading model: {weights_path}")
     model = load_model(weights_path)
     print(f"[Landmarks] Model ready.")
@@ -114,3 +119,63 @@ def render_landmarks_video(input_video_path, output_video_path,
         "elapsed_seconds":  elapsed,
         "per_frame":        per_frame_keypoints,
     }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Pipeline Integration (NEW)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def run_landmarks(
+    input_video_path: str,
+    output_video_path: str,
+    analytics_dir: Path,
+    weights_path: str = "models/weights/court_kp.pt",
+    conf_threshold: float = 0.30,
+    log_every: int = 30,
+) -> Dict:
+    """
+    Court landmark detection — pipeline-friendly wrapper.
+
+    Args:
+        input_video_path:  Path to the video to process.
+        output_video_path: Where to save the video with landmarks drawn.
+        analytics_dir:     Directory for saving landmark data JSON.
+        weights_path:      Path to YOLO-pose weights.
+        conf_threshold:    Confidence threshold for keypoints.
+        log_every:         Log progress every N frames.
+
+    Returns:
+        Dict with stats and per-frame keypoint data.
+    """
+    print("\n🏀 Running Court Landmark Detection...")
+
+    result = render_landmarks_video(
+        input_video_path=input_video_path,
+        output_video_path=output_video_path,
+        weights_path=weights_path,
+        conf_threshold=conf_threshold,
+        log_every=log_every,
+    )
+
+    # Save per-frame keypoints to analytics dir
+    landmarks_json_path = analytics_dir / "landmarks.json"
+    landmarks_json_path.parent.mkdir(parents=True, exist_ok=True)
+
+    serializable_data = {
+        "total_frames": result["total_frames"],
+        "frames_with_kp": result["frames_with_kp"],
+        "avg_kp_per_frame": result["avg_kp_per_frame"],
+        "elapsed_seconds": result["elapsed_seconds"],
+        "per_frame": [
+            [{"idx": idx, "x": x, "y": y, "conf": conf} for idx, x, y, conf in frame_kps]
+            for frame_kps in result["per_frame"]
+        ],
+    }
+
+    with open(landmarks_json_path, "w", encoding="utf-8") as f:
+        json.dump(serializable_data, f, indent=2)
+
+    print(f"   Landmarks JSON → {landmarks_json_path}")
+    print(f"   Landmarks video → {output_video_path}")
+
+    return result

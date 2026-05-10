@@ -318,7 +318,7 @@
       "frame": 26,
       "player_id": null,
       "team": null,
-      "distance": 77.42
+      "distance": null
     },
     {
       "frame": 27,
@@ -1500,7 +1500,7 @@
       "frame": 223,
       "player_id": "10",
       "team": "T1",
-      "distance": 50.45
+      "distance": 51.22
     },
     {
       "frame": 224,

@@ -31,6 +31,7 @@ from src.analytics.possession import (
     get_possession_by_frame,
 )
 from src.analytics.possession_overlay import render_possession_video
+from src.analytics.court_detection.landmarks_overlay import run_landmarks
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -53,6 +54,10 @@ TEAM_1_DESC = "a basketball player wearing a dark blue jersey"
 # ── Possession Config ─────────────────────────────────────────────────────────
 BALL_POSSESSION_THRESHOLD = 80.0      # pixels: max distance ball→player center
 POSSESSION_MIN_FRAMES     = 3         # debounce: frames to confirm change
+
+# ── Landmark Config ───────────────────────────────────────────────────────────
+LANDMARKS_WEIGHTS = "models/weights/court_kp.pt"
+LANDMARKS_CONF    = 0.30
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -232,10 +237,22 @@ def main():
         fps=fps,
     )
 
+    # ── Court Landmarks ─────────────────────────────────────────────────────
+    print("\n🏀 Running Court Landmark Detection...")
+    landmarks_video_path = str(Path(OUTPUT_PATH).parent / "tracking_landmarks.mp4")
+    run_landmarks(
+        input_video_path=possession_video_path,
+        output_video_path=landmarks_video_path,
+        analytics_dir=analytics_dir,
+        weights_path=LANDMARKS_WEIGHTS,
+        conf_threshold=LANDMARKS_CONF,
+        log_every=30,
+    )
+
     # Visualization (dashboard + score banner + shot flashes)
     final_output = str(Path(OUTPUT_PATH).parent / "final_output1.mp4")
     render_video(
-        video_path=possession_video_path,  # Use possession video as input
+        video_path=landmarks_video_path,  # Use landmarks video as input
         traj_path=TRAJECTORIES_PATH,
         dist_csv=analytics_dir / "distance_report.csv",
         speed_csv=analytics_dir / "speed_report.csv",
@@ -249,6 +266,7 @@ def main():
           f'({tracker.frame_count / elapsed:.1f} FPS avg)')
     print(f'   Tracked video      → {OUTPUT_PATH}')
     print(f'   Possession video   → {possession_video_path}')
+    print(f'   Landmarks video    → {landmarks_video_path}')
     print(f'   Final video        → {final_output}')
 
 

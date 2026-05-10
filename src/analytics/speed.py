@@ -124,7 +124,7 @@ def compute_speed(
         except (TypeError, IndexError, ValueError, KeyError):
             continue
 
-    if len(valid) < 2:
+    if len(valid) < 5:
         return None
 
     valid.sort(key=lambda p: p[2])
@@ -136,8 +136,8 @@ def compute_speed(
         x1, y1, f1 = valid[i]
 
         frame_diff = f1 - f0
-        if frame_diff <= 0:
-            continue  # skip duplicate or out-of-order frames
+        if frame_diff <= 0 or frame_diff > 15:
+            continue  # skip duplicate, out-of-order, or large-gap frames
 
         dist_px = math.hypot(x1 - x0, y1 - y0)
         time_s = frame_diff / fps

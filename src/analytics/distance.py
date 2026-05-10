@@ -71,12 +71,13 @@ def compute_distance(
         raise ValueError(f"meters_per_pixel must be positive, got {meters_per_pixel!r}.")
 
     pts = _sanitize_trajectory(raw)
-    if not pts:
+    if len(pts) < 5:
         return None
 
     dist_px = sum(
         math.hypot(x2 - x1, y2 - y1)
-        for (x1, y1, _), (x2, y2, _) in zip(pts, pts[1:])
+        for (x1, y1, f1), (x2, y2, f2) in zip(pts, pts[1:])
+        if f2 - f1 <= 15
     )
     frames = [p[2] for p in pts]
 

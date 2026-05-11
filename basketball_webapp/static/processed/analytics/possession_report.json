@@ -1,0 +1,3204 @@
+{
+  "summary": {
+    "total_frames": 507,
+    "team_possession": {
+      "T2": {
+        "frames": 78,
+        "percentage": 15.38
+      },
+      "T1": {
+        "frames": 125,
+        "percentage": 24.65
+      }
+    },
+    "player_possession": {
+      "2": {
+        "frames": 78,
+        "percentage": 15.38,
+        "team": "T2"
+      },
+      "6": {
+        "frames": 5,
+        "percentage": 0.99,
+        "team": "T1"
+      },
+      "10": {
+        "frames": 109,
+        "percentage": 21.5,
+        "team": "T1"
+      },
+      "9": {
+        "frames": 7,
+        "percentage": 1.38,
+        "team": "T1"
+      },
+      "5": {
+        "frames": 4,
+        "percentage": 0.79,
+        "team": "T1"
+      }
+    },
+    "possession_changes": 23
+  },
+  "changes": [
+    {
+      "frame": 13,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 22,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 30,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 43,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 79,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 84,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 91,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 94,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 118,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 121,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 124,
+      "from_team": null,
+      "to_team": "T1"
+    },
+    {
+      "frame": 129,
+      "from_team": "T1",
+      "to_team": null
+    },
+    {
+      "frame": 132,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 141,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 157,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 185,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 188,
+      "from_team": null,
+      "to_team": "T2"
+    },
+    {
+      "frame": 196,
+      "from_team": "T2",
+      "to_team": null
+    },
+    {
+      "frame": 216,
+      "from_team": null,
+      "to_team": "T1"
+    },
+    {
+      "frame": 325,
+      "from_team": "T1",
+      "to_team": null
+    },
+    {
+      "frame": 440,
+      "from_team": null,
+      "to_team": "T1"
+    },
+    {
+      "frame": 447,
+      "from_team": "T1",
+      "to_team": "T1"
+    },
+    {
+      "frame": 451,
+      "from_team": "T1",
+      "to_team": null
+    }
+  ],
+  "per_frame": [
+    {
+      "frame": 0,
+      "player_id": null,
+      "team": null,
+      "distance": 73.93
+    },
+    {
+      "frame": 1,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 2,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 3,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 4,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 5,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 6,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 7,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 8,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 9,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 10,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 11,
+      "player_id": null,
+      "team": null,
+      "distance": 77.47
+    },
+    {
+      "frame": 12,
+      "player_id": null,
+      "team": null,
+      "distance": 59.54
+    },
+    {
+      "frame": 13,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 51.0
+    },
+    {
+      "frame": 14,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 48.26
+    },
+    {
+      "frame": 15,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 43.57
+    },
+    {
+      "frame": 16,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 17,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 36.06
+    },
+    {
+      "frame": 18,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 34.01
+    },
+    {
+      "frame": 19,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 36.67
+    },
+    {
+      "frame": 20,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 21,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 22,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 23,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 24,
+      "player_id": null,
+      "team": null,
+      "distance": 75.72
+    },
+    {
+      "frame": 25,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 26,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 27,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 28,
+      "player_id": null,
+      "team": null,
+      "distance": 79.4
+    },
+    {
+      "frame": 29,
+      "player_id": null,
+      "team": null,
+      "distance": 78.6
+    },
+    {
+      "frame": 30,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 77.42
+    },
+    {
+      "frame": 31,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 32,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 63.53
+    },
+    {
+      "frame": 33,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 63.95
+    },
+    {
+      "frame": 34,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 64.88
+    },
+    {
+      "frame": 35,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 36,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 60.17
+    },
+    {
+      "frame": 37,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 54.59
+    },
+    {
+      "frame": 38,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 50.09
+    },
+    {
+      "frame": 39,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 49.65
+    },
+    {
+      "frame": 40,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 53.24
+    },
+    {
+      "frame": 41,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 42,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 43,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 44,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 45,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 46,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 47,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 48,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 49,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 50,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 51,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 52,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 53,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 54,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 55,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 56,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 57,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 58,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 59,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 60,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 61,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 62,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 63,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 64,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 65,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 66,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 67,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 68,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 69,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 70,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 71,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 72,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 73,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 74,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 75,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 76,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 77,
+      "player_id": null,
+      "team": null,
+      "distance": 37.22
+    },
+    {
+      "frame": 78,
+      "player_id": null,
+      "team": null,
+      "distance": 35.34
+    },
+    {
+      "frame": 79,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 28.44
+    },
+    {
+      "frame": 80,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 28.44
+    },
+    {
+      "frame": 81,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 33.62
+    },
+    {
+      "frame": 82,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 83,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 84,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 85,
+      "player_id": null,
+      "team": null,
+      "distance": 65.46
+    },
+    {
+      "frame": 86,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 87,
+      "player_id": null,
+      "team": null,
+      "distance": 68.54
+    },
+    {
+      "frame": 88,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 89,
+      "player_id": null,
+      "team": null,
+      "distance": 50.7
+    },
+    {
+      "frame": 90,
+      "player_id": null,
+      "team": null,
+      "distance": 42.72
+    },
+    {
+      "frame": 91,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 33.73
+    },
+    {
+      "frame": 92,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 93,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 94,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 95,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 96,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 97,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 98,
+      "player_id": null,
+      "team": null,
+      "distance": 20.25
+    },
+    {
+      "frame": 99,
+      "player_id": null,
+      "team": null,
+      "distance": 23.32
+    },
+    {
+      "frame": 100,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 101,
+      "player_id": null,
+      "team": null,
+      "distance": 28.18
+    },
+    {
+      "frame": 102,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 103,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 104,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 105,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 106,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 107,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 108,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 109,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 110,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 111,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 112,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 113,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 114,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 115,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 116,
+      "player_id": null,
+      "team": null,
+      "distance": 38.48
+    },
+    {
+      "frame": 117,
+      "player_id": null,
+      "team": null,
+      "distance": 36.67
+    },
+    {
+      "frame": 118,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 35.85
+    },
+    {
+      "frame": 119,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 120,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 121,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 122,
+      "player_id": null,
+      "team": null,
+      "distance": 45.54
+    },
+    {
+      "frame": 123,
+      "player_id": null,
+      "team": null,
+      "distance": 49.4
+    },
+    {
+      "frame": 124,
+      "player_id": "6",
+      "team": "T1",
+      "distance": 45.18
+    },
+    {
+      "frame": 125,
+      "player_id": "6",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 126,
+      "player_id": "6",
+      "team": "T1",
+      "distance": 45.54
+    },
+    {
+      "frame": 127,
+      "player_id": "6",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 128,
+      "player_id": "6",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 129,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 130,
+      "player_id": null,
+      "team": null,
+      "distance": 52.48
+    },
+    {
+      "frame": 131,
+      "player_id": null,
+      "team": null,
+      "distance": 48.26
+    },
+    {
+      "frame": 132,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 41.87
+    },
+    {
+      "frame": 133,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 38.29
+    },
+    {
+      "frame": 134,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 36.36
+    },
+    {
+      "frame": 135,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 34.44
+    },
+    {
+      "frame": 136,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 32.89
+    },
+    {
+      "frame": 137,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 35.9
+    },
+    {
+      "frame": 138,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 35.36
+    },
+    {
+      "frame": 139,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 140,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 141,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 142,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 143,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 144,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 145,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 146,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 147,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 148,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 149,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 150,
+      "player_id": null,
+      "team": null,
+      "distance": 34.0
+    },
+    {
+      "frame": 151,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 152,
+      "player_id": null,
+      "team": null,
+      "distance": 45.62
+    },
+    {
+      "frame": 153,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 154,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 155,
+      "player_id": null,
+      "team": null,
+      "distance": 46.1
+    },
+    {
+      "frame": 156,
+      "player_id": null,
+      "team": null,
+      "distance": 53.71
+    },
+    {
+      "frame": 157,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 63.51
+    },
+    {
+      "frame": 158,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 73.41
+    },
+    {
+      "frame": 159,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 79.03
+    },
+    {
+      "frame": 160,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 78.23
+    },
+    {
+      "frame": 161,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 66.37
+    },
+    {
+      "frame": 162,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 65.39
+    },
+    {
+      "frame": 163,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 164,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 61.4
+    },
+    {
+      "frame": 165,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 69.23
+    },
+    {
+      "frame": 166,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 70.58
+    },
+    {
+      "frame": 167,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 62.29
+    },
+    {
+      "frame": 168,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 69.12
+    },
+    {
+      "frame": 169,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 71.0
+    },
+    {
+      "frame": 170,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 63.01
+    },
+    {
+      "frame": 171,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 61.0
+    },
+    {
+      "frame": 172,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 60.01
+    },
+    {
+      "frame": 173,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 59.08
+    },
+    {
+      "frame": 174,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 57.08
+    },
+    {
+      "frame": 175,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 53.08
+    },
+    {
+      "frame": 176,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 49.16
+    },
+    {
+      "frame": 177,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 44.1
+    },
+    {
+      "frame": 178,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 42.3
+    },
+    {
+      "frame": 179,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 180,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 181,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 41.11
+    },
+    {
+      "frame": 182,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 42.43
+    },
+    {
+      "frame": 183,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 184,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 185,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 186,
+      "player_id": null,
+      "team": null,
+      "distance": 39.7
+    },
+    {
+      "frame": 187,
+      "player_id": null,
+      "team": null,
+      "distance": 41.04
+    },
+    {
+      "frame": 188,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 41.73
+    },
+    {
+      "frame": 189,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 41.01
+    },
+    {
+      "frame": 190,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 38.95
+    },
+    {
+      "frame": 191,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 60.44
+    },
+    {
+      "frame": 192,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 75.03
+    },
+    {
+      "frame": 193,
+      "player_id": "2",
+      "team": "T2",
+      "distance": 68.41
+    },
+    {
+      "frame": 194,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 195,
+      "player_id": "2",
+      "team": "T2",
+      "distance": null
+    },
+    {
+      "frame": 196,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 197,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 198,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 199,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 200,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 201,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 202,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 203,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 204,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 205,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 206,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 207,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 208,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 209,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 210,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 211,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 212,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 213,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 214,
+      "player_id": null,
+      "team": null,
+      "distance": 39.12
+    },
+    {
+      "frame": 215,
+      "player_id": null,
+      "team": null,
+      "distance": 36.22
+    },
+    {
+      "frame": 216,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 64.4
+    },
+    {
+      "frame": 217,
+      "player_id": "10",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 218,
+      "player_id": "10",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 219,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 56.61
+    },
+    {
+      "frame": 220,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 58.01
+    },
+    {
+      "frame": 221,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 57.43
+    },
+    {
+      "frame": 222,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 54.41
+    },
+    {
+      "frame": 223,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 51.22
+    },
+    {
+      "frame": 224,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 48.92
+    },
+    {
+      "frame": 225,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 43.14
+    },
+    {
+      "frame": 226,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 42.45
+    },
+    {
+      "frame": 227,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 40.31
+    },
+    {
+      "frame": 228,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 38.95
+    },
+    {
+      "frame": 229,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 39.2
+    },
+    {
+      "frame": 230,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 34.67
+    },
+    {
+      "frame": 231,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 32.76
+    },
+    {
+      "frame": 232,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 31.3
+    },
+    {
+      "frame": 233,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 31.02
+    },
+    {
+      "frame": 234,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 31.32
+    },
+    {
+      "frame": 235,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 33.96
+    },
+    {
+      "frame": 236,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 33.73
+    },
+    {
+      "frame": 237,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 35.51
+    },
+    {
+      "frame": 238,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 36.67
+    },
+    {
+      "frame": 239,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 39.32
+    },
+    {
+      "frame": 240,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 40.2
+    },
+    {
+      "frame": 241,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 41.19
+    },
+    {
+      "frame": 242,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 40.2
+    },
+    {
+      "frame": 243,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 41.05
+    },
+    {
+      "frame": 244,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 41.01
+    },
+    {
+      "frame": 245,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 41.01
+    },
+    {
+      "frame": 246,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 41.44
+    },
+    {
+      "frame": 247,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 40.02
+    },
+    {
+      "frame": 248,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 43.46
+    },
+    {
+      "frame": 249,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 45.28
+    },
+    {
+      "frame": 250,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 43.42
+    },
+    {
+      "frame": 251,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 50.93
+    },
+    {
+      "frame": 252,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 57.69
+    },
+    {
+      "frame": 253,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 60.88
+    },
+    {
+      "frame": 254,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 53.71
+    },
+    {
+      "frame": 255,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 45.19
+    },
+    {
+      "frame": 256,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 36.06
+    },
+    {
+      "frame": 257,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 32.39
+    },
+    {
+      "frame": 258,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 29.15
+    },
+    {
+      "frame": 259,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 30.41
+    },
+    {
+      "frame": 260,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 28.44
+    },
+    {
+      "frame": 261,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 27.66
+    },
+    {
+      "frame": 262,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 20.62
+    },
+    {
+      "frame": 263,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 15.81
+    },
+    {
+      "frame": 264,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 13.15
+    },
+    {
+      "frame": 265,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 12.04
+    },
+    {
+      "frame": 266,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 12.37
+    },
+    {
+      "frame": 267,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 16.12
+    },
+    {
+      "frame": 268,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 19.21
+    },
+    {
+      "frame": 269,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 26.63
+    },
+    {
+      "frame": 270,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 34.48
+    },
+    {
+      "frame": 271,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 42.94
+    },
+    {
+      "frame": 272,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 23.85
+    },
+    {
+      "frame": 273,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 25.3
+    },
+    {
+      "frame": 274,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 50.7
+    },
+    {
+      "frame": 275,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 43.08
+    },
+    {
+      "frame": 276,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 35.34
+    },
+    {
+      "frame": 277,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 29.55
+    },
+    {
+      "frame": 278,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 24.19
+    },
+    {
+      "frame": 279,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 25.55
+    },
+    {
+      "frame": 280,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 29.0
+    },
+    {
+      "frame": 281,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 24.7
+    },
+    {
+      "frame": 282,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 27.78
+    },
+    {
+      "frame": 283,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 25.94
+    },
+    {
+      "frame": 284,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 22.85
+    },
+    {
+      "frame": 285,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 22.14
+    },
+    {
+      "frame": 286,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 21.59
+    },
+    {
+      "frame": 287,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 23.35
+    },
+    {
+      "frame": 288,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 27.29
+    },
+    {
+      "frame": 289,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 30.27
+    },
+    {
+      "frame": 290,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 32.25
+    },
+    {
+      "frame": 291,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 33.24
+    },
+    {
+      "frame": 292,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 28.44
+    },
+    {
+      "frame": 293,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 22.8
+    },
+    {
+      "frame": 294,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 24.04
+    },
+    {
+      "frame": 295,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 24.04
+    },
+    {
+      "frame": 296,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 20.88
+    },
+    {
+      "frame": 297,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 18.97
+    },
+    {
+      "frame": 298,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 20.62
+    },
+    {
+      "frame": 299,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 23.35
+    },
+    {
+      "frame": 300,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 22.56
+    },
+    {
+      "frame": 301,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 24.19
+    },
+    {
+      "frame": 302,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 27.02
+    },
+    {
+      "frame": 303,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 28.07
+    },
+    {
+      "frame": 304,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 20.81
+    },
+    {
+      "frame": 305,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 33.73
+    },
+    {
+      "frame": 306,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 38.9
+    },
+    {
+      "frame": 307,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 41.63
+    },
+    {
+      "frame": 308,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 42.72
+    },
+    {
+      "frame": 309,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 47.42
+    },
+    {
+      "frame": 310,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 53.15
+    },
+    {
+      "frame": 311,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 57.8
+    },
+    {
+      "frame": 312,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 60.9
+    },
+    {
+      "frame": 313,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 65.31
+    },
+    {
+      "frame": 314,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 69.08
+    },
+    {
+      "frame": 315,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 70.52
+    },
+    {
+      "frame": 316,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 73.08
+    },
+    {
+      "frame": 317,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 75.19
+    },
+    {
+      "frame": 318,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 78.64
+    },
+    {
+      "frame": 319,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 44.72
+    },
+    {
+      "frame": 320,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 79.81
+    },
+    {
+      "frame": 321,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 31.38
+    },
+    {
+      "frame": 322,
+      "player_id": "10",
+      "team": "T1",
+      "distance": 43.86
+    },
+    {
+      "frame": 323,
+      "player_id": "10",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 324,
+      "player_id": "10",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 325,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 326,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 327,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 328,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 329,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 330,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 331,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 332,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 333,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 334,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 335,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 336,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 337,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 338,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 339,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 340,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 341,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 342,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 343,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 344,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 345,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 346,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 347,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 348,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 349,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 350,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 351,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 352,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 353,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 354,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 355,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 356,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 357,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 358,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 359,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 360,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 361,
+      "player_id": null,
+      "team": null,
+      "distance": 41.34
+    },
+    {
+      "frame": 362,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 363,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 364,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 365,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 366,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 367,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 368,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 369,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 370,
+      "player_id": null,
+      "team": null,
+      "distance": 36.12
+    },
+    {
+      "frame": 371,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 372,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 373,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 374,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 375,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 376,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 377,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 378,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 379,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 380,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 381,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 382,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 383,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 384,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 385,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 386,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 387,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 388,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 389,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 390,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 391,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 392,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 393,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 394,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 395,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 396,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 397,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 398,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 399,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 400,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 401,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 402,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 403,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 404,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 405,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 406,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 407,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 408,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 409,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 410,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 411,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 412,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 413,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 414,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 415,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 416,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 417,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 418,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 419,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 420,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 421,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 422,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 423,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 424,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 425,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 426,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 427,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 428,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 429,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 430,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 431,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 432,
+      "player_id": null,
+      "team": null,
+      "distance": 78.19
+    },
+    {
+      "frame": 433,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 434,
+      "player_id": null,
+      "team": null,
+      "distance": 57.31
+    },
+    {
+      "frame": 435,
+      "player_id": null,
+      "team": null,
+      "distance": 31.02
+    },
+    {
+      "frame": 436,
+      "player_id": null,
+      "team": null,
+      "distance": 52.33
+    },
+    {
+      "frame": 437,
+      "player_id": null,
+      "team": null,
+      "distance": 48.37
+    },
+    {
+      "frame": 438,
+      "player_id": null,
+      "team": null,
+      "distance": 31.02
+    },
+    {
+      "frame": 439,
+      "player_id": null,
+      "team": null,
+      "distance": 31.38
+    },
+    {
+      "frame": 440,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 36.8
+    },
+    {
+      "frame": 441,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 42.64
+    },
+    {
+      "frame": 442,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 46.04
+    },
+    {
+      "frame": 443,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 51.0
+    },
+    {
+      "frame": 444,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 55.46
+    },
+    {
+      "frame": 445,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 60.22
+    },
+    {
+      "frame": 446,
+      "player_id": "9",
+      "team": "T1",
+      "distance": 53.25
+    },
+    {
+      "frame": 447,
+      "player_id": "5",
+      "team": "T1",
+      "distance": 48.55
+    },
+    {
+      "frame": 448,
+      "player_id": "5",
+      "team": "T1",
+      "distance": 42.19
+    },
+    {
+      "frame": 449,
+      "player_id": "5",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 450,
+      "player_id": "5",
+      "team": "T1",
+      "distance": null
+    },
+    {
+      "frame": 451,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 452,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 453,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 454,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 455,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 456,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 457,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 458,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 459,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 460,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 461,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 462,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 463,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 464,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 465,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 466,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 467,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 468,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 469,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 470,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 471,
+      "player_id": null,
+      "team": null,
+      "distance": 76.11
+    },
+    {
+      "frame": 472,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 473,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 474,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 475,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 476,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 477,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 478,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 479,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 480,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 481,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 482,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 483,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 484,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 485,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 486,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 487,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 488,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 489,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 490,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 491,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 492,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 493,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 494,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 495,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 496,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 497,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 498,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 499,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 500,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 501,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 502,
+      "player_id": null,
+      "team": null,
+      "distance": 21.26
+    },
+    {
+      "frame": 503,
+      "player_id": null,
+      "team": null,
+      "distance": 20.0
+    },
+    {
+      "frame": 504,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 505,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    },
+    {
+      "frame": 506,
+      "player_id": null,
+      "team": null,
+      "distance": null
+    }
+  ]
+}

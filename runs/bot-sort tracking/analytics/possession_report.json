@@ -3,12 +3,12 @@
     "total_frames": 507,
     "team_possession": {
       "T2": {
-        "frames": 186,
-        "percentage": 36.69
+        "frames": 190,
+        "percentage": 37.48
       },
       "T1": {
-        "frames": 16,
-        "percentage": 3.16
+        "frames": 12,
+        "percentage": 2.37
       }
     },
     "player_possession": {
@@ -32,10 +32,10 @@
         "percentage": 1.38,
         "team": "T1"
       },
-      "5": {
+      "1": {
         "frames": 4,
         "percentage": 0.79,
-        "team": "T1"
+        "team": "T2"
       }
     },
     "possession_changes": 23
@@ -149,11 +149,11 @@
     {
       "frame": 447,
       "from_team": "T1",
-      "to_team": "T1"
+      "to_team": "T2"
     },
     {
       "frame": 451,
-      "from_team": "T1",
+      "from_team": "T2",
       "to_team": null
     }
   ],
@@ -318,7 +318,7 @@
       "frame": 26,
       "player_id": null,
       "team": null,
-      "distance": 77.42
+      "distance": null
     },
     {
       "frame": 27,
@@ -1734,13 +1734,13 @@
       "frame": 262,
       "player_id": "10",
       "team": "T2",
-      "distance": 21.59
+      "distance": 20.62
     },
     {
       "frame": 263,
       "player_id": "10",
       "team": "T2",
-      "distance": 16.76
+      "distance": 15.81
     },
     {
       "frame": 264,
@@ -2010,7 +2010,7 @@
       "frame": 308,
       "player_id": "10",
       "team": "T2",
-      "distance": 43.27
+      "distance": 42.72
     },
     {
       "frame": 309,
@@ -2328,7 +2328,7 @@
       "frame": 361,
       "player_id": null,
       "team": null,
-      "distance": 65.15
+      "distance": 63.79
     },
     {
       "frame": 362,
@@ -2842,26 +2842,26 @@
     },
     {
       "frame": 447,
-      "player_id": "5",
-      "team": "T1",
+      "player_id": "1",
+      "team": "T2",
       "distance": 48.55
     },
     {
       "frame": 448,
-      "player_id": "5",
-      "team": "T1",
+      "player_id": "1",
+      "team": "T2",
       "distance": 42.19
     },
     {
       "frame": 449,
-      "player_id": "5",
-      "team": "T1",
+      "player_id": "1",
+      "team": "T2",
       "distance": null
     },
     {
       "frame": 450,
-      "player_id": "5",
-      "team": "T1",
+      "player_id": "1",
+      "team": "T2",
       "distance": null
     },
     {
@@ -3072,7 +3072,7 @@
       "frame": 485,
       "player_id": null,
       "team": null,
-      "distance": 34.71
+      "distance": null
     },
     {
       "frame": 486,

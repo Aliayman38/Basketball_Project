@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basketball Analysis Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+        <div class="logo">
+            <i class="fas fa-basketball-ball"></i>
+            <span>BasketAI</span>
+        </div>
+
+        <ul class="nav-menu">
+            <li class="nav-item active" data-screen="upload">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <span>Upload</span>
+            </li>
+            <li class="nav-item" data-screen="tracking">
+                <i class="fas fa-video"></i>
+                <span>Detection & Tracking</span>
+            </li>
+            <li class="nav-item" data-screen="homography">
+                <i class="fas fa-chess-board"></i>
+                <span>Homography</span>
+            </li>
+            <li class="nav-item" data-screen="landmarks">
+                <i class="fas fa-map-marker-alt"></i>
+                <span>Landmarks</span>
+            </li>
+            <li class="nav-item" data-screen="dashboard">
+                <i class="fas fa-chart-line"></i>
+                <span>Dashboard</span>
+            </li>
+        </ul>
+
+        <div class="sidebar-footer">
+            <div class="processing-status" id="processingStatus">
+                <div class="status-dot idle"></div>
+                <span>Ready</span>
+            </div>
+            <div class="pipeline-badge" id="pipelineBadge" style="margin-top:8px; font-size:11px; color:#808080;">
+                <i class="fas fa-microchip"></i> <span id="pipelineStatus">Checking...</span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <h1 id="pageTitle">Upload Video</h1>
+
+            <!-- Score Counter -->
+            <div class="score-counter">
+                <div class="team-score team-0">
+                    <div class="team-color" style="background: #FF8C00;"></div>
+                    <span class="team-name">Team Yellow</span>
+                    <div class="score-controls">
+                        <button class="score-btn minus" onclick="updateScore('team_0', 'subtract')">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <span class="score-value" id="scoreTeam0">0</span>
+                        <button class="score-btn plus" onclick="updateScore('team_0', 'add')">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="score-divider">VS</div>
+
+                <div class="team-score team-1">
+                    <div class="team-color" style="background: #2E6BAA;"></div>
+                    <span class="team-name">Team Blue</span>
+                    <div class="score-controls">
+                        <button class="score-btn minus" onclick="updateScore('team_1', 'subtract')">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <span class="score-value" id="scoreTeam1">0</span>
+                        <button class="score-btn plus" onclick="updateScore('team_1', 'add')">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <button class="reset-score" onclick="updateScore('all', 'reset')" title="Reset Score">
+                    <i class="fas fa-undo"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Screens Container -->
+        <div class="screens-container">
+
+            <!-- Upload Screen -->
+            <section class="screen active" id="screen-upload">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <h2>Drop your basketball video here</h2>
+                    <p>or click to browse files</p>
+                    <span class="file-types">MP4, AVI, MOV, MKV</span>
+                    <input type="file" id="fileInput" accept="video/*" hidden>
+                </div>
+
+                <div class="uploaded-file hidden" id="uploadedFile">
+                    <div class="file-info">
+                        <i class="fas fa-file-video" id="fileIcon"></i>
+                        <div class="file-details">
+                            <span class="file-name" id="fileName">video.mp4</span>
+                            <span class="file-status" id="fileStatus">Ready for processing</span>
+                            <span class="file-meta" id="fileMeta"></span>
+                        </div>
+                    </div>
+                    <button class="process-btn" id="processBtn" onclick="startProcessing()">
+                        <i class="fas fa-play"></i>
+                        Start Analysis
+                    </button>
+                </div>
+
+                <!-- Preview Video -->
+                <div class="preview-panel hidden" id="previewPanel">
+                    <h3><i class="fas fa-eye"></i> Original Video Preview</h3>
+                    <div class="video-wrapper preview-wrapper">
+                        <video id="previewVideo" controls preload="metadata">
+                            <source src="/uploaded_video" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                    </div>
+                </div>
+
+                <!-- Progress Panel -->
+                <div class="progress-panel hidden" id="progressPanel">
+                    <h3><i class="fas fa-cogs"></i> Processing Pipeline</h3>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                        <span class="progress-text" id="progressText">0%</span>
+                    </div>
+                    <div class="step-indicator" id="stepIndicator">Initializing...</div>
+
+                    <div class="pipeline-steps">
+                        <div class="step" data-step="1">
+                            <div class="step-icon"><i class="fas fa-search"></i></div>
+                            <span>Detection</span>
+                        </div>
+                        <div class="step" data-step="2">
+                            <div class="step-icon"><i class="fas fa-route"></i></div>
+                            <span>Tracking</span>
+                        </div>
+                        <div class="step" data-step="3">
+                            <div class="step-icon"><i class="fas fa-bullseye"></i></div>
+                            <span>Shots</span>
+                        </div>
+                        <div class="step" data-step="4">
+                            <div class="step-icon"><i class="fas fa-map-marked-alt"></i></div>
+                            <span>Landmarks</span>
+                        </div>
+                        <div class="step" data-step="5">
+                            <div class="step-icon"><i class="fas fa-project-diagram"></i></div>
+                            <span>Homography</span>
+                        </div>
+                        <div class="step" data-step="6">
+                            <div class="step-icon"><i class="fas fa-chart-pie"></i></div>
+                            <span>Dashboard</span>
+                        </div>
+                    </div>
+
+                    <div class="log-console" id="logConsole">
+                        <div class="log-header">
+                            <i class="fas fa-terminal"></i>
+                            <span>Processing Logs</span>
+                        </div>
+                        <div class="log-content" id="logContent"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Detection & Tracking Screen -->
+            <section class="screen" id="screen-tracking">
+                <div class="video-container">
+                    <div class="video-wrapper">
+                        <video id="trackingVideo" controls preload="metadata">
+                            <source src="" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <div class="video-overlay" id="trackingOverlay">
+                            <div class="overlay-badge">
+                                <i class="fas fa-robot"></i>
+                                <span>AI Detection Active</span>
+                            </div>
+                            <div class="tracking-stats">
+                                <div class="stat-pill">
+                                    <i class="fas fa-users"></i>
+                                    <span id="playersCount">10 Players</span>
+                                </div>
+                                <div class="stat-pill">
+                                    <i class="fas fa-basketball-ball"></i>
+                                    <span>Ball Tracked</span>
+                                </div>
+                                <div class="stat-pill">
+                                    <i class="fas fa-fingerprint"></i>
+                                    <span>Re-ID Active</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="video-sidebar">
+                        <div class="panel">
+                            <h3><i class="fas fa-info-circle"></i> Tracking Info</h3>
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <span class="label">Frames</span>
+                                    <span class="value" id="totalFrames">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">FPS</span>
+                                    <span class="value" id="fps">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Resolution</span>
+                                    <span class="value" id="resolution">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Model</span>
+                                    <span class="value">YOLO + BoT-SORT</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3><i class="fas fa-hand-paper"></i> Ball Possession</h3>
+                            <div class="possession-bar">
+                                <div class="possession-team team-0-bar" id="possessionBar0" style="width: 50%">
+                                    <span id="possessionText0">50%</span>
+                                </div>
+                                <div class="possession-team team-1-bar" id="possessionBar1" style="width: 50%">
+                                    <span id="possessionText1">50%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3><i class="fas fa-crosshairs"></i> Detected Shots</h3>
+                            <div class="shots-list" id="shotsList">
+                                <div class="empty-state">No shots detected yet</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Homography Screen -->
+            <section class="screen" id="screen-homography">
+                <div class="split-view">
+                    <div class="view-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-video"></i> Original View</h3>
+                            <span class="badge">Camera Perspective</span>
+                        </div>
+                        <div class="video-wrapper">
+                            <video id="homographyVideo" controls preload="metadata">
+                                <source src="" type="video/mp4">
+                            </video>
+                        </div>
+                    </div>
+
+                    <div class="view-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-chess-board"></i> Top-Down Court View</h3>
+                            <span class="badge">Homography Transform</span>
+                        </div>
+                        <div class="canvas-container" id="topdownCanvas">
+                            <div class="court-diagram" id="courtDiagram">
+                                <div class="court-outline">
+                                    <div class="court-key key-left"></div>
+                                    <div class="court-key key-right"></div>
+                                    <div class="three-point-line left"></div>
+                                    <div class="three-point-line right"></div>
+                                    <div class="center-circle"></div>
+                                    <div class="center-line"></div>
+                                    <div class="hoop hoop-left"></div>
+                                    <div class="hoop hoop-right"></div>
+                                </div>
+                                <div class="players-overlay" id="topdownPlayers"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="homography-controls">
+                    <div class="panel">
+                        <h3><i class="fas fa-sliders-h"></i> Homography Parameters</h3>
+                        <div class="params-grid">
+                            <div class="param-item">
+                                <span class="label">Matrix Valid</span>
+                                <span class="value badge-success" id="matrixValid">Yes</span>
+                            </div>
+                            <div class="param-item">
+                                <span class="label">Reprojection Error</span>
+                                <span class="value" id="reprojError">3.2 px</span>
+                            </div>
+                            <div class="param-item">
+                                <span class="label">Keypoints Used</span>
+                                <span class="value" id="kpUsed">12/12</span>
+                            </div>
+                            <div class="param-item">
+                                <span class="label">RANSAC Threshold</span>
+                                <span class="value">8.0 px</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Landmarks Screen -->
+            <section class="screen" id="screen-landmarks">
+                <div class="video-container">
+                    <div class="video-wrapper large">
+                        <video id="landmarksVideo" controls preload="metadata">
+                            <source src="" type="video/mp4">
+                        </video>
+                        <div class="landmark-legend" id="landmarkLegend">
+                            <div class="legend-item">
+                                <span class="dot" style="background: #FF8C00;"></span>
+                                <span>Corner</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="dot" style="background: #00FF88;"></span>
+                                <span>Key Point</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="dot" style="background: #FF3366;"></span>
+                                <span>Hoop</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="dot" style="background: #00CCFF;"></span>
+                                <span>Free Throw</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="video-sidebar">
+                        <div class="panel">
+                            <h3><i class="fas fa-map-marker-alt"></i> Court Keypoints</h3>
+                            <div class="keypoints-list" id="keypointsList">
+                                <div class="keypoint-item"><span class="kp-num">0</span><span class="kp-name">Top-Left Corner</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">1</span><span class="kp-name">Top-Right Corner</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">2</span><span class="kp-name">Bottom-Left Corner</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">3</span><span class="kp-name">Bottom-Right Corner</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">4</span><span class="kp-name">Left Hoop</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">5</span><span class="kp-name">Right Hoop</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">6</span><span class="kp-name">Free Throw Left</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                                <div class="keypoint-item"><span class="kp-num">7</span><span class="kp-name">Free Throw Right</span><span class="kp-status detected"><i class="fas fa-check"></i></span></div>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3><i class="fas fa-chart-bar"></i> Detection Accuracy</h3>
+                            <div class="accuracy-ring">
+                                <svg viewBox="0 0 100 100">
+                                    <circle class="bg" cx="50" cy="50" r="45"/>
+                                    <circle class="progress" cx="50" cy="50" r="45" id="accuracyCircle"/>
+                                </svg>
+                                <div class="accuracy-text">
+                                    <span class="value" id="accuracyValue">87%</span>
+                                    <span class="label">Accuracy</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel">
+                            <h3><i class="fas fa-cog"></i> Settings</h3>
+                            <div class="setting-item">
+                                <span>Confidence Threshold</span>
+                                <span class="badge">0.30</span>
+                            </div>
+                            <div class="setting-item">
+                                <span>Model</span>
+                                <span class="badge">court_kp.pt</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Dashboard Screen -->
+            <section class="screen" id="screen-dashboard">
+                <div class="dashboard-grid">
+                    <div class="stats-row">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(255,140,0,0.15);">
+                                <i class="fas fa-users" style="color: #FF8C00;"></i>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="dashPlayers">10</span>
+                                <span class="stat-label">Players Tracked</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(0,255,136,0.15);">
+                                <i class="fas fa-bullseye" style="color: #00FF88;"></i>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="dashShots">4</span>
+                                <span class="stat-label">Shots Made</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(0,204,255,0.15);">
+                                <i class="fas fa-tachometer-alt" style="color: #00CCFF;"></i>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="dashSpeed">4.2</span>
+                                <span class="stat-label">Avg Speed (m/s)</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: rgba(255,51,102,0.15);">
+                                <i class="fas fa-route" style="color: #FF3366;"></i>
+                            </div>
+                            <div class="stat-info">
+                                <span class="stat-value" id="dashDistance">2.4</span>
+                                <span class="stat-label">Total Distance (km)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="charts-row">
+                        <div class="chart-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-chart-pie"></i> Ball Possession</h3>
+                            </div>
+                            <div class="chart-content">
+                                <div class="possession-donut" id="possessionDonut">
+                                    <svg viewBox="0 0 200 200">
+                                        <circle class="donut-bg" cx="100" cy="100" r="80"/>
+                                        <circle class="donut-seg team0" cx="100" cy="100" r="80" id="donutTeam0"/>
+                                        <circle class="donut-seg team1" cx="100" cy="100" r="80" id="donutTeam1"/>
+                                    </svg>
+                                    <div class="donut-center">
+                                        <span class="pct" id="donutPct">58%</span>
+                                        <span class="label">Team Yellow</span>
+                                    </div>
+                                </div>
+                                <div class="possession-legend">
+                                    <div class="legend-row">
+                                        <span class="color" style="background: #FF8C00;"></span>
+                                        <span>Team Yellow</span>
+                                        <span class="pct" id="legendTeam0">58%</span>
+                                    </div>
+                                    <div class="legend-row">
+                                        <span class="color" style="background: #2E6BAA;"></span>
+                                        <span>Team Blue</span>
+                                        <span class="pct" id="legendTeam1">42%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="chart-panel wide">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-chart-area"></i> Speed Over Time</h3>
+                            </div>
+                            <div class="chart-content">
+                                <canvas id="speedChart" width="600" height="250"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bottom-row">
+                        <div class="chart-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-list-ol"></i> Shot Log</h3>
+                            </div>
+                            <div class="chart-content">
+                                <table class="data-table" id="shotTable">
+                                    <thead><tr><th>#</th><th>Time</th><th>Team</th><th>Confidence</th><th>Result</th></tr></thead>
+                                    <tbody id="shotTableBody"><tr><td colspan="5" class="empty">No shots recorded</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="chart-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-table"></i> Distance Report</h3>
+                            </div>
+                            <div class="chart-content">
+                                <table class="data-table" id="distanceTable">
+                                    <thead><tr><th>Player</th><th>Distance (m)</th><th>Speed (m/s)</th></tr></thead>
+                                    <tbody id="distanceTableBody"><tr><td colspan="3" class="empty">No data available</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="video-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-film"></i> Final Output Video</h3>
+                        </div>
+                        <div class="video-wrapper">
+                            <video id="finalVideo" controls preload="metadata">
+                                <source src="" type="video/mp4">
+                            </video>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

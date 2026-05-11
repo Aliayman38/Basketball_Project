@@ -141,7 +141,7 @@ def render_topdown_video(
     # Load per-frame keypoints
     with open(keypoints_json) as f:
         kp_data = json.load(f)
-    per_frame_kps = kp_data["per_frame_keypoints"]
+    per_frame_kps = kp_data["per_frame"]
     print(f"[Topdown] Loaded {len(per_frame_kps)} frames of keypoints")
 
     # Load player trajectories
@@ -213,8 +213,8 @@ def render_topdown_video(
             # This frame's keypoints
             if fi < len(per_frame_kps):
                 raw = per_frame_kps[fi]
-                keypoints = [(int(kp[0]), float(kp[1]), float(kp[2]),
-                              float(kp[3])) for kp in raw]
+                keypoints = [(int(kp["idx"]), float(kp["x"]), float(kp["y"]),
+                              float(kp["conf"])) for kp in raw]
             else:
                 keypoints = []
 

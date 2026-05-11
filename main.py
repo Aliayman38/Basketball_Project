@@ -13,7 +13,7 @@ from pathlib import Path
 
 from tracking.tracker import BasketballTracker, TEAM_NAMES_SHORT
 from src.analytics.dashboard import render_video
-
+from src.analytics.court_detection.topdown_view import render_topdown_video
 # ── Analytics ─────────────────────────────────────────────────────────────────
 import sys
 _src = Path(__file__).parent / "src"
@@ -249,7 +249,22 @@ def main():
         conf_threshold=LANDMARKS_CONF,
         log_every=30,
     )
+   # ── Top-Down Homography View ────────────────────────────────────────────
+    print("\n🗺️ Rendering top-down minimap (homography)...")
+    topdown_video_path = str(Path(OUTPUT_PATH).parent / "tracking_topdown.mp4")
+    landmarks_json_path = str(analytics_dir / "landmarks.json") # استخدام الاسم الصحيح للملف
 
+    try:
+        render_topdown_video(
+            input_video_path=landmarks_video_path,
+            output_video_path=topdown_video_path,
+            keypoints_json=landmarks_json_path,
+            trajectories_json=TRAJECTORIES_PATH,
+        )
+    except Exception as e:
+        print(f'   ⚠️ Top-down step failed: {e}')
+
+    
     # Visualization (dashboard + score banner + shot flashes)
     final_output = str(Path(OUTPUT_PATH).parent / "final_output1.mp4")
     render_video(

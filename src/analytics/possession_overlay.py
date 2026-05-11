@@ -96,7 +96,7 @@ def draw_possession_label(
     x1, y1, x2, y2 = map(int, bbox)
     h, w = frame.shape[:2]
 
-    label_text = f"🏀 HAS BALL — P{player_id}"
+    label_text = f"HAS BALL - P{player_id}"
     if team:
         label_text += f" [{team}]"
 

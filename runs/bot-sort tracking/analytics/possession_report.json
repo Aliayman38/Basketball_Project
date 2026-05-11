@@ -3,12 +3,12 @@
     "total_frames": 507,
     "team_possession": {
       "T2": {
-        "frames": 78,
-        "percentage": 15.38
+        "frames": 186,
+        "percentage": 36.69
       },
       "T1": {
-        "frames": 125,
-        "percentage": 24.65
+        "frames": 16,
+        "percentage": 3.16
       }
     },
     "player_possession": {
@@ -23,9 +23,9 @@
         "team": "T1"
       },
       "10": {
-        "frames": 109,
-        "percentage": 21.5,
-        "team": "T1"
+        "frames": 108,
+        "percentage": 21.3,
+        "team": "T2"
       },
       "9": {
         "frames": 7,
@@ -134,11 +134,11 @@
     {
       "frame": 216,
       "from_team": null,
-      "to_team": "T1"
+      "to_team": "T2"
     },
     {
-      "frame": 325,
-      "from_team": "T1",
+      "frame": 324,
+      "from_team": "T2",
       "to_team": null
     },
     {
@@ -318,7 +318,7 @@
       "frame": 26,
       "player_id": null,
       "team": null,
-      "distance": null
+      "distance": 77.42
     },
     {
       "frame": 27,
@@ -1146,73 +1146,73 @@
       "frame": 164,
       "player_id": "2",
       "team": "T2",
-      "distance": 61.4
+      "distance": null
     },
     {
       "frame": 165,
       "player_id": "2",
       "team": "T2",
-      "distance": 69.23
+      "distance": 72.01
     },
     {
       "frame": 166,
       "player_id": "2",
       "team": "T2",
-      "distance": 70.58
+      "distance": 71.57
     },
     {
       "frame": 167,
       "player_id": "2",
       "team": "T2",
-      "distance": 62.29
+      "distance": null
     },
     {
       "frame": 168,
       "player_id": "2",
       "team": "T2",
-      "distance": 69.12
+      "distance": 73.06
     },
     {
       "frame": 169,
       "player_id": "2",
       "team": "T2",
-      "distance": 71.0
+      "distance": 73.0
     },
     {
       "frame": 170,
       "player_id": "2",
       "team": "T2",
-      "distance": 63.01
+      "distance": null
     },
     {
       "frame": 171,
       "player_id": "2",
       "team": "T2",
-      "distance": 61.0
+      "distance": 67.03
     },
     {
       "frame": 172,
       "player_id": "2",
       "team": "T2",
-      "distance": 60.01
+      "distance": 66.03
     },
     {
       "frame": 173,
       "player_id": "2",
       "team": "T2",
-      "distance": 59.08
+      "distance": 65.12
     },
     {
       "frame": 174,
       "player_id": "2",
       "team": "T2",
-      "distance": 57.08
+      "distance": null
     },
     {
       "frame": 175,
       "player_id": "2",
       "team": "T2",
-      "distance": 53.08
+      "distance": 54.08
     },
     {
       "frame": 176,
@@ -1230,7 +1230,7 @@
       "frame": 178,
       "player_id": "2",
       "team": "T2",
-      "distance": 42.3
+      "distance": 42.19
     },
     {
       "frame": 179,
@@ -1457,655 +1457,655 @@
     {
       "frame": 216,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 64.4
     },
     {
       "frame": 217,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": null
     },
     {
       "frame": 218,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": null
     },
     {
       "frame": 219,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 56.61
     },
     {
       "frame": 220,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 58.01
     },
     {
       "frame": 221,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 57.43
     },
     {
       "frame": 222,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 54.41
     },
     {
       "frame": 223,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 51.22
     },
     {
       "frame": 224,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 48.92
     },
     {
       "frame": 225,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 43.14
     },
     {
       "frame": 226,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 42.45
     },
     {
       "frame": 227,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 40.31
     },
     {
       "frame": 228,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 38.95
     },
     {
       "frame": 229,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 39.2
     },
     {
       "frame": 230,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 34.67
     },
     {
       "frame": 231,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 32.76
     },
     {
       "frame": 232,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 31.3
     },
     {
       "frame": 233,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 31.02
     },
     {
       "frame": 234,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 31.32
     },
     {
       "frame": 235,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 33.96
     },
     {
       "frame": 236,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 33.73
     },
     {
       "frame": 237,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 35.51
     },
     {
       "frame": 238,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 36.67
     },
     {
       "frame": 239,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 39.32
     },
     {
       "frame": 240,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 40.2
     },
     {
       "frame": 241,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 41.19
     },
     {
       "frame": 242,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 40.2
     },
     {
       "frame": 243,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 41.05
     },
     {
       "frame": 244,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 41.01
     },
     {
       "frame": 245,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 41.01
     },
     {
       "frame": 246,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 41.44
     },
     {
       "frame": 247,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 40.02
     },
     {
       "frame": 248,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 43.46
     },
     {
       "frame": 249,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 45.28
     },
     {
       "frame": 250,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 43.42
     },
     {
       "frame": 251,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 50.93
     },
     {
       "frame": 252,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 57.69
     },
     {
       "frame": 253,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 60.88
     },
     {
       "frame": 254,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 53.71
     },
     {
       "frame": 255,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 45.19
     },
     {
       "frame": 256,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 36.06
     },
     {
       "frame": 257,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 32.39
     },
     {
       "frame": 258,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 29.15
     },
     {
       "frame": 259,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 30.41
     },
     {
       "frame": 260,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 28.44
     },
     {
       "frame": 261,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 27.66
     },
     {
       "frame": 262,
       "player_id": "10",
-      "team": "T1",
-      "distance": 20.62
+      "team": "T2",
+      "distance": 21.59
     },
     {
       "frame": 263,
       "player_id": "10",
-      "team": "T1",
-      "distance": 15.81
+      "team": "T2",
+      "distance": 16.76
     },
     {
       "frame": 264,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 13.15
     },
     {
       "frame": 265,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 12.04
     },
     {
       "frame": 266,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 12.37
     },
     {
       "frame": 267,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 16.12
     },
     {
       "frame": 268,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 19.21
     },
     {
       "frame": 269,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 26.63
     },
     {
       "frame": 270,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 34.48
     },
     {
       "frame": 271,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 42.94
     },
     {
       "frame": 272,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 23.85
     },
     {
       "frame": 273,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 25.3
     },
     {
       "frame": 274,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 50.7
     },
     {
       "frame": 275,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 43.08
     },
     {
       "frame": 276,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 35.34
     },
     {
       "frame": 277,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 29.55
     },
     {
       "frame": 278,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 24.19
     },
     {
       "frame": 279,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 25.55
     },
     {
       "frame": 280,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 29.0
     },
     {
       "frame": 281,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 24.7
     },
     {
       "frame": 282,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 27.78
     },
     {
       "frame": 283,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 25.94
     },
     {
       "frame": 284,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 22.85
     },
     {
       "frame": 285,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 22.14
     },
     {
       "frame": 286,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 21.59
     },
     {
       "frame": 287,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 23.35
     },
     {
       "frame": 288,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 27.29
     },
     {
       "frame": 289,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 30.27
     },
     {
       "frame": 290,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 32.25
     },
     {
       "frame": 291,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 33.24
     },
     {
       "frame": 292,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 28.44
     },
     {
       "frame": 293,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 22.8
     },
     {
       "frame": 294,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 24.04
     },
     {
       "frame": 295,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 24.04
     },
     {
       "frame": 296,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 20.88
     },
     {
       "frame": 297,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 18.97
     },
     {
       "frame": 298,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 20.62
     },
     {
       "frame": 299,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 23.35
     },
     {
       "frame": 300,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 22.56
     },
     {
       "frame": 301,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 24.19
     },
     {
       "frame": 302,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 27.02
     },
     {
       "frame": 303,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 28.07
     },
     {
       "frame": 304,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 20.81
     },
     {
       "frame": 305,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 33.73
     },
     {
       "frame": 306,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 38.9
     },
     {
       "frame": 307,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 41.63
     },
     {
       "frame": 308,
       "player_id": "10",
-      "team": "T1",
-      "distance": 42.72
+      "team": "T2",
+      "distance": 43.27
     },
     {
       "frame": 309,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 47.42
     },
     {
       "frame": 310,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 53.15
     },
     {
       "frame": 311,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 57.8
     },
     {
       "frame": 312,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 60.9
     },
     {
       "frame": 313,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 65.31
     },
     {
       "frame": 314,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 69.08
     },
     {
       "frame": 315,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 70.52
     },
     {
       "frame": 316,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 73.08
     },
     {
       "frame": 317,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 75.19
     },
     {
       "frame": 318,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 78.64
     },
     {
       "frame": 319,
       "player_id": "10",
-      "team": "T1",
-      "distance": 44.72
+      "team": "T2",
+      "distance": null
     },
     {
       "frame": 320,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 79.81
     },
     {
       "frame": 321,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": 31.38
     },
     {
       "frame": 322,
       "player_id": "10",
-      "team": "T1",
-      "distance": 43.86
+      "team": "T2",
+      "distance": null
     },
     {
       "frame": 323,
       "player_id": "10",
-      "team": "T1",
+      "team": "T2",
       "distance": null
     },
     {
       "frame": 324,
-      "player_id": "10",
-      "team": "T1",
+      "player_id": null,
+      "team": null,
       "distance": null
     },
     {
@@ -2328,7 +2328,7 @@
       "frame": 361,
       "player_id": null,
       "team": null,
-      "distance": 41.34
+      "distance": 65.15
     },
     {
       "frame": 362,
@@ -2382,7 +2382,7 @@
       "frame": 370,
       "player_id": null,
       "team": null,
-      "distance": 36.12
+      "distance": 73.44
     },
     {
       "frame": 371,
@@ -3072,7 +3072,7 @@
       "frame": 485,
       "player_id": null,
       "team": null,
-      "distance": null
+      "distance": 34.71
     },
     {
       "frame": 486,

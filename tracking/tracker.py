@@ -3,6 +3,7 @@ src/tracker.py
 Basketball tracking pipeline: detection, tracking, team classification, trajectory recording.
 """
 
+
 from __future__ import annotations
 
 import cv2
@@ -12,13 +13,45 @@ from pathlib import Path
 from collections import defaultdict
 from typing import Any
 
+from team_clustering.fusion_core import MultiSignalClusterer, TeamAssignmentTracker
 from detection.detector import BasketballDetector
 from team_clustering.clusterer import CLIPTeamClusterer
 from boxmot.trackers.botsort.botsort import BotSort
+from pathlib import Path
+
 
 # ── Kalman stability patch ────────────────────────────────────────────────────
 from boxmot.motion.kalman_filters.base import BaseKalmanFilter
 import scipy.linalg
+
+class TeamAssignmentTracker:
+    def __init__(self, lock_after=15):
+        self.history = {}       
+        self.locked = {}        
+        self.lock_after = lock_after
+
+    def update(self, player_id, new_team):
+        if player_id in self.locked:
+            return self.locked[player_id]  
+            
+        if player_id not in self.history:
+            self.history[player_id] = []
+            
+        if new_team is not None:
+            self.history[player_id].append(new_team)
+            
+        if not self.history[player_id]:
+            return None
+            
+        # أخذ أغلبية التصويت لآخر 15 إطار صالح
+        recent = self.history[player_id][-15:]
+        team = max(set(recent), key=recent.count)
+                
+        # قفل التصنيف بعد عدد معين من القراءات الصالحة
+        if len(self.history[player_id]) >= self.lock_after:
+            self.locked[player_id] = team
+                
+        return team
 
 def _stable_update_state(self, z, R=None, H=None):
     _H = self._resolve_matrix(H, self.H)
@@ -143,20 +176,25 @@ class BasketballTracker:
 
     def __init__(
         self,
+
         model_path: str,
         reid_path: str,
         device: torch.device,
         team_0_desc: str = TEAM_0_DESC,
         team_1_desc: str = TEAM_1_DESC,
-        clip_refresh: int = CLIP_REFRESH_EVERY,
+        clip_refresh: int = 15,
     ):
         self.detector   = BasketballDetector(model_path)
         self.id_manager = IDManager()
         self.clip       = CLIPTeamClusterer(team_0_desc=team_0_desc, team_1_desc=team_1_desc)
         self.clip_refresh = clip_refresh
+      
+        self.clusterer = MultiSignalClusterer(team_0_desc=team_0_desc, team_1_desc=team_1_desc)
+        self.team_voter = TeamAssignmentTracker(lock_after=25)
+        self.team_cache = {}
+        self.clip_refresh = clip_refresh
 
         self.tracker = BotSort(
-            reid_weights      = Path(reid_path),
             device            = device,
             half              = True,
             track_high_thresh = 0.30,
@@ -168,13 +206,13 @@ class BasketballTracker:
             appearance_thresh = 0.40,
             cmc_method        = 'ecc',
             frame_rate        = 30,
-            with_reid         = True,
+            with_reid         = False,
             min_hits          = 1,
         )
 
         # Team assignment state
         self.team_cache: dict[int, tuple[int, int]] = {}       # custom_id -> (team_idx, frame)
-        self.persistent_teams: dict[int, int] = {}              # custom_id -> team_idx
+        self.team_voter = TeamAssignmentTracker(lock_after=15)              # custom_id -> team_idx
 
         # Trajectory accumulators
         self.trajectories = {
@@ -270,28 +308,38 @@ class BasketballTracker:
         return frame
 
     def _get_team(self, frame, x1, y1, x2, y2, custom_id: int) -> int | None:
-        """Get team assignment for a player, using cache and CLIP as needed."""
-        if custom_id in self.persistent_teams:
-            team_idx = self.persistent_teams[custom_id]
-            self.team_cache[custom_id] = (team_idx, self.frame_count)
-            return team_idx
+        if custom_id in self.team_voter.locked:
+            return self.team_voter.locked[custom_id]
 
         cached = self.team_cache.get(custom_id)
-        needs_update = (cached is None or
+        needs_update = (cached is None or 
                         (self.frame_count - cached[1]) >= self.clip_refresh)
 
+        raw_team = None
+        
         if needs_update:
-            try:
-                team_idx = self.clip.predict(frame, x1, y1, x2, y2)
-                self.team_cache[custom_id] = (team_idx, self.frame_count)
-                self.persistent_teams[custom_id] = team_idx
-            except Exception as e:
-                print(f"[WARNING] CLIP error for player {custom_id}: {e}")
-                team_idx = cached[0] if cached else None
-        else:
-            team_idx = cached[0]
+            bbox = [x1, y1, x2, y2]
+            # 1. Apply Torso Crop
+            jersey_crop = self.clusterer.extract_jersey_crop(frame, bbox)
+            
+            # 2. Apply CLIP with 0.6 Confidence Threshold
+            raw_team = self.clusterer.assign_team_clip(jersey_crop, threshold=0.6)
+            
+            if raw_team is not None:
+                self.team_cache[custom_id] = (raw_team, self.frame_count)
+            else:
+                # 3. Fallback to HSV dominant color if CLIP is uncertain
+                hsv_color = self.clusterer.get_dominant_color_hsv(jersey_crop)
+                if hsv_color is not None:
+                    # Logic to map HSV color to a team can be implemented here
+                    pass
 
-        return team_idx
+        vote_input = raw_team if raw_team is not None else (cached[0] if cached else None)
+        
+        # 4. Temporal Majority Voting on the last 15 frames
+        final_team = self.team_voter.update(custom_id, vote_input)
+        
+        return final_team
 
     def get_trajectories(self) -> dict:
         """Return trajectories as plain dicts (not defaultdicts)."""

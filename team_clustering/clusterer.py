@@ -34,24 +34,26 @@ class CLIPTeamClusterer:
         print(f"   Team 1: {team_0_desc}")
         print(f"   Team 2: {team_1_desc}")
 
-    def predict(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> int:
-        """Predict team from a live frame crop. Returns 0 or 1."""
+    def predict(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, threshold: float = 0.80) -> int | None:
+        """Predict team from a live frame crop. Returns 0, 1, or None if uncertain."""
         h, w = y2 - y1, x2 - x1
-        cy1 = int(y1 + h * 0.10)
-        cy2 = int(y2 - h * 0.40)
-        cx1 = int(x1 + w * 0.20)
-        cx2 = int(x2 - w * 0.20)
+        
+        # 1. اقتطاع منطقة الجذع فقط (40% إلى 80% من الارتفاع)
+        cy1 = int(y1 + h * 0.40)
+        cy2 = int(y1 + h * 0.80)
+        cx1 = int(x1 + w * 0.15)
+        cx2 = int(x2 - w * 0.15)
 
         fh, fw = frame.shape[:2]
         cy1, cy2 = max(0, cy1), min(fh, cy2)
         cx1, cx2 = max(0, cx1), min(fw, cx2)
 
         if cy2 <= cy1 or cx2 <= cx1:
-            return 0
+            return None
 
         bgr_crop = frame[cy1:cy2, cx1:cx2]
         if bgr_crop.size == 0:
-            return 0
+            return None
 
         rgb_crop  = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(rgb_crop)
@@ -65,6 +67,11 @@ class CLIPTeamClusterer:
 
         with torch.no_grad():
             outputs = self.model(**inputs)
-            probs   = outputs.logits_per_image.softmax(dim=1)
+            probs   = outputs.logits_per_image.softmax(dim=1)[0] # استخراج المصفوفة 1D
+
+        # 2. تطبيق عتبة الثقة (Threshold)
+        max_prob = torch.max(probs).item()
+        if max_prob < threshold:
+            return None  # رفض التصنيف إذا كانت الثقة ضعيفة
 
         return int(probs.argmax().item())

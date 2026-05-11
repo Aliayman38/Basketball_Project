@@ -38,9 +38,9 @@ from src.analytics.court_detection.landmarks_overlay import run_landmarks
 #  Config
 # ═════════════════════════════════════════════════════════════════════════════
 
-VIDEO_PATH        = 'data/shooting3.mp4'
+VIDEO_PATH        = 'input_video/shooting3.mp4'
 MODEL_PATH        = 'models/weights/last.pt'
-OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_botsort3.mp4'
+OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_botsort333.mp4'
 TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
 REID_PATH         = 'osnet_x0_25_msmt17.pt'
 DEVICE            = torch.device('cuda:0')
@@ -124,7 +124,7 @@ def run_shot_detection(trajectories_path: str, analytics_dir: Path) -> list[Shot
     return shots
 
 
-def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clip) -> list[tuple[int, int]]:
+def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clusterer) -> list[tuple[int, int]]:
     """Assign each shot to a team and return (frame, team_idx) events."""
     events = []
     for shot in shots:
@@ -136,7 +136,7 @@ def assign_shot_teams(shots: list[ShotResult], trajectories: dict, clip) -> list
                     dist = ((px - shot.entry_x) ** 2 + (py - shot.entry_y) ** 2) ** 0.5
                     if dist < best_dist and rec.get("team"):
                         best_dist = dist
-                        best_team = 0 if rec["team"] == clip.TEAM_NAMES[0] else 1
+                        best_team = 0 if rec["team"] == clusterer.team_names[0] else 1
         events.append((shot.arc_end_frame, best_team))
         print(f"   Shot at frame {shot.arc_end_frame} → Team {TEAM_NAMES_SHORT[best_team]}")
     return events
@@ -216,13 +216,14 @@ def main():
     analytics_dir = Path(TRAJECTORIES_PATH).parent
 
     shots = run_shot_detection(TRAJECTORIES_PATH, analytics_dir)
-    shot_events = assign_shot_teams(shots, trajectories, tracker.clip)
+    # ── التعديل الأول هنا ───────────────────────────────────────────────────
+    shot_events = assign_shot_teams(shots, trajectories, tracker.clusterer)
     run_analytics(trajectories, fps, analytics_dir, METERS_PER_PIXEL, INCLUDE_REFEREES)
 
-    # ── Ball Possession ─────────────────────────────────────────────────────
+    # ── Ball Possession (التعديل الثاني هنا) ────────────────────────────────
     team_names = (
-        tracker.clip.TEAM_NAMES[0] if hasattr(tracker.clip, 'TEAM_NAMES') else "Team 0",
-        tracker.clip.TEAM_NAMES[1] if hasattr(tracker.clip, 'TEAM_NAMES') else "Team 1",
+        tracker.clusterer.team_names[0] if hasattr(tracker.clusterer, 'team_names') else "Team 0",
+        tracker.clusterer.team_names[1] if hasattr(tracker.clusterer, 'team_names') else "Team 1",
     )
     possession_by_frame = run_possession(trajectories, fps, analytics_dir, team_names=team_names)
 

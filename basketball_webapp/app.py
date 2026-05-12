@@ -16,6 +16,7 @@ import time
 import re
 import hashlib
 import shutil
+import select
 from datetime import datetime
 import cv2  # Required for video info reading and demo pipeline
 
@@ -48,6 +49,7 @@ processing_state = {
     'results': {},
     'score': {'team_0': 0, 'team_1': 0},
     'logs': [],
+    'selected_model': None,
 }
 
 state_lock = threading.Lock()
@@ -83,12 +85,8 @@ def send_file_partial(path, mimetype='video/mp4'):
         if g[0]: byte1 = int(g[0])
         if g[1]: byte2 = int(g[1])
 
-    if byte2 is not None:
-        length = byte2 - byte1 + 1
-    else:
-        length = size - byte1
+    length = (byte2 - byte1 + 1) if byte2 is not None else (size - byte1)
 
-    data = None
     with open(path, 'rb') as f:
         f.seek(byte1)
         data = f.read(length)
@@ -108,6 +106,7 @@ def send_file_partial(path, mimetype='video/mp4'):
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
 def log_message(msg):
     with state_lock:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -116,11 +115,25 @@ def log_message(msg):
             processing_state['logs'] = processing_state['logs'][-100:]
     print(f"[LOG] {msg}")
 
+
 def update_progress(step, percent):
     with state_lock:
         processing_state['current_step'] = step
         processing_state['progress'] = percent
     print(f"[PROGRESS] {step}: {percent}%")
+
+
+def create_error_video(dst_path, message="Error"):
+    """Create a minimal placeholder video file when a pipeline output is missing."""
+    try:
+        import numpy as np
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(dst_path, fourcc, 1, (640, 480))
+        frame = np.zeros((480, 640, 3), dtype='uint8')
+        writer.write(frame)
+        writer.release()
+    except Exception as e:
+        log_message(f"   WARNING: Could not create error placeholder video: {e}")
 
 # =============================================================================
 #  PIPELINE RUNNER - Calls your main.py via subprocess
@@ -132,46 +145,45 @@ def reencode_h264(src: str, dst: str) -> bool:
     Tries ffmpeg first (most reliable), falls back to OpenCV.
     Returns True if successful.
     """
-    # ── Try ffmpeg ────────────────────────────────────────────────────────────
+    # Try ffmpeg first
     try:
         result = subprocess.run(
             [
                 'ffmpeg', '-y', '-i', src,
                 '-vcodec', 'libx264',
-                '-pix_fmt', 'yuv420p',   # required for broad browser compatibility
+                '-pix_fmt', 'yuv420p',
                 '-preset', 'fast',
                 '-crf', '23',
-                '-movflags', '+faststart',  # puts index at front for streaming
-                '-an',                      # drop audio (CV pipelines have none)
+                '-movflags', '+faststart',
+                '-an',
                 dst
             ],
             capture_output=True, text=True, timeout=600
         )
         if result.returncode == 0 and os.path.exists(dst) and os.path.getsize(dst) > 0:
-            log_message(f"   ✅ Re-encoded (ffmpeg H.264): {Path(dst).name}")
+            log_message(f"   Re-encoded (ffmpeg H.264): {Path(dst).name}")
             return True
         else:
-            log_message(f"   ⚠️ ffmpeg failed: {result.stderr[-300:] if result.stderr else 'no output'}")
+            log_message(f"   ffmpeg failed: {result.stderr[-300:] if result.stderr else 'no output'}")
     except FileNotFoundError:
-        log_message("   ⚠️ ffmpeg not found, trying OpenCV fallback...")
+        log_message("   ffmpeg not found, trying OpenCV fallback...")
     except Exception as e:
-        log_message(f"   ⚠️ ffmpeg error: {e}")
+        log_message(f"   ffmpeg error: {e}")
 
-    # ── Fallback: OpenCV with avc1 (H.264) codec ─────────────────────────────
+    # Fallback: OpenCV with avc1 (H.264) codec
     try:
         cap = cv2.VideoCapture(src)
         if not cap.isOpened():
             return False
-        fps   = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        w     = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h     = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        w      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fourcc = cv2.VideoWriter_fourcc(*'avc1')
         writer = cv2.VideoWriter(dst, fourcc, fps, (w, h))
         if not writer.isOpened():
-            # avc1 unavailable on this OpenCV build; just copy as-is
             cap.release()
             shutil.copy2(src, dst)
-            log_message(f"   ⚠️ H.264 unavailable, copied as-is: {Path(dst).name}")
+            log_message(f"   H.264 unavailable, copied as-is: {Path(dst).name}")
             return True
         while True:
             ret, frame = cap.read()
@@ -181,115 +193,166 @@ def reencode_h264(src: str, dst: str) -> bool:
         cap.release()
         writer.release()
         if os.path.exists(dst) and os.path.getsize(dst) > 0:
-            log_message(f"   ✅ Re-encoded (OpenCV avc1): {Path(dst).name}")
+            log_message(f"   Re-encoded (OpenCV avc1): {Path(dst).name}")
             return True
     except Exception as e:
-        log_message(f"   ⚠️ OpenCV re-encode failed: {e}")
+        log_message(f"   OpenCV re-encode failed: {e}")
 
     # Last resort: just copy
     shutil.copy2(src, dst)
-    log_message(f"   ⚠️ Could not re-encode, copied raw: {Path(dst).name}")
+    log_message(f"   Could not re-encode, copied raw: {Path(dst).name}")
     return False
 
 
-def run_pipeline_subprocess(video_path: str, output_dir: str):
+def run_pipeline_subprocess(video_path: str, output_dir: str, model_path: str = None):
     """
-    Run your existing main.py pipeline by calling it as a subprocess.
-    This guarantees you get the EXACT same 5 outputs.
+    Run main.py pipeline via subprocess with proper deadlock prevention.
+    Uses select for non-blocking output reading.
     """
 
-    log_message("🚀 Starting pipeline via main.py...")
+    log_message("=" * 60)
+    log_message("STARTING PIPELINE")
+    log_message("=" * 60)
+    log_message(f"   Video: {video_path}")
+    log_message(f"   Output dir: {output_dir}")
+    log_message(f"   Model: {model_path}")
 
-    # ── FIX 1: Find main.py at project root (app.py lives in basketball_webapp/ subdir) ──
-    # Check current dir first, then parent (the actual project root)
     main_py_path = APP_DIR / 'main.py'
     if not main_py_path.exists():
         main_py_path = APP_DIR.parent / 'main.py'
     if not main_py_path.exists():
-        log_message(f"❌ main.py not found in {APP_DIR} or {APP_DIR.parent}")
-        log_message("   Falling back to demo mode...")
+        log_message(f"main.py not found in {APP_DIR} or {APP_DIR.parent}")
         run_demo_pipeline(video_path, output_dir)
         return
 
-    # ── FIX 2: PROJECT_ROOT is where main.py lives — all relative paths resolve from here ──
-    PROJECT_ROOT = main_py_path.parent
+    PROJECT_ROOT  = main_py_path.parent
     log_message(f"Found main.py at: {main_py_path}")
-    log_message(f"Project root: {PROJECT_ROOT}")
 
-    # Create output directories relative to project root (matching main.py's OUTPUT_PATH)
-    runs_dir = PROJECT_ROOT / 'runs' / 'bot-sort tracking'
+    runs_dir      = PROJECT_ROOT / 'runs' / 'bot-sort tracking'
     analytics_dir = runs_dir / 'analytics'
+
+    # Clear old outputs
+    if runs_dir.exists():
+        log_message("Clearing old outputs...")
+        shutil.rmtree(runs_dir)
     runs_dir.mkdir(parents=True, exist_ok=True)
     analytics_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── FIX 3: Copy video into PROJECT_ROOT/data/ (not basketball_webapp/data/) ──
-    data_dir = PROJECT_ROOT / 'data'
+    # Clear processed folder
+    for f in Path(output_dir).glob('*.mp4'):
+        try:
+            f.unlink()
+        except Exception:
+            pass
+
+    # Copy video to data directory
+    data_dir        = PROJECT_ROOT / 'data'
     data_dir.mkdir(exist_ok=True)
-    video_name = Path(video_path).name
+    video_name      = Path(video_path).name
     data_video_path = data_dir / video_name
     shutil.copy2(video_path, data_video_path)
     log_message(f"Video copied to: {data_video_path}")
 
-    temp_main = PROJECT_ROOT / 'main_web_temp.py'
+    # Read and patch main.py
+    with open(main_py_path, 'r', encoding='utf-8') as f:
+        main_content = f.read()
 
-    try:
-        with open(main_py_path, 'r', encoding='utf-8') as f:
-            main_content = f.read()
+    # NOTE: all regex patterns use triple-quoted raw strings to avoid quote conflicts
 
-        # Use regex replacements so they work regardless of the exact filename in main.py
+    # Patch VIDEO_PATH
+    main_content = re.sub(
+        r"""VIDEO_PATH\s*=\s*['"].*?['"]""",
+        f"VIDEO_PATH = 'data/{video_name}'",
+        main_content
+    )
+
+    # Patch OUTPUT_PATH
+    main_content = re.sub(
+        r"""OUTPUT_PATH\s*=\s*['"].*?['"]""",
+        "OUTPUT_PATH = 'runs/bot-sort tracking/tracking_output.mp4'",
+        main_content
+    )
+
+    # Patch MODEL_PATH
+    if model_path:
+        model_path_repr = repr(model_path)
         main_content = re.sub(
-            r"VIDEO_PATH\s*=\s*['\"].*?['\"]",
-            f"VIDEO_PATH = 'data/{video_name}'",
+            r"""MODEL_PATH\s*=\s*['"].*?['"]""",
+            f"MODEL_PATH = {model_path_repr}",
             main_content
         )
-        main_content = re.sub(
-            r"OUTPUT_PATH\s*=\s*['\"].*?['\"]",
-            "OUTPUT_PATH = 'runs/bot-sort tracking/tracking_output.mp4'",
-            main_content
+        log_message(f"Patched MODEL_PATH: {model_path}")
+
+    # Patch DEVICE
+    main_content = re.sub(
+        r"""DEVICE\s*=\s*torch\.device\(['"]cuda:\d+['"]\)""",
+        "DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')",
+        main_content
+    )
+
+    # CPU shim — built with concatenation to avoid any nested quote issues
+    cpu_shim = (
+        "# --- CPU compatibility shim injected by app.py ---\n"
+        "import torch as _torch\n"
+        "if not _torch.cuda.is_available():\n"
+        "    try:\n"
+        "        from boxmot.trackers.botsort.botsort import BotSort as _BotSort\n"
+        "        _orig_botsort_init = _BotSort.__init__\n"
+        "        def _cpu_botsort_init(self, *args, **kwargs):\n"
+        "            kwargs['half'] = False\n"
+        "            _orig_botsort_init(self, *args, **kwargs)\n"
+        "        _BotSort.__init__ = _cpu_botsort_init\n"
+        "    except Exception as _e:\n"
+        '        print("[SHIM] BotSort CPU patch skipped:", _e)\n'
+        "# --- end shim ---\n\n"
+    )
+
+    # Insert after the last `from __future__` import, or prepend if none exist
+    future_import_end = 0
+    for match in re.finditer(r'from __future__ import.*?\n', main_content):
+        future_import_end = match.end()
+
+    if future_import_end > 0:
+        main_content = (
+            main_content[:future_import_end]
+            + cpu_shim
+            + main_content[future_import_end:]
         )
-
-        # ── FIX 4: Replace hardcoded cuda:0 with a safe CPU fallback ──
-        # tracker.py also passes device into BotSort with half=True which breaks on CPU,
-        # so we patch both DEVICE and the BotSort half flag here.
-        main_content = re.sub(
-            r"DEVICE\s*=\s*torch\.device\(['\"]cuda:\d+['\"]\)",
-            "DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')",
-            main_content
-        )
-
-        # Prepend a CPU-compatibility shim: BotSort's half=True crashes on CPU
-        cpu_shim = """\
-# --- CPU compatibility shim injected by app.py ---
-import torch as _torch
-if not _torch.cuda.is_available():
-    try:
-        from boxmot.trackers.botsort.botsort import BotSort as _BotSort
-        _orig_botsort_init = _BotSort.__init__
-        def _cpu_botsort_init(self, *args, **kwargs):
-            kwargs['half'] = False
-            _orig_botsort_init(self, *args, **kwargs)
-        _BotSort.__init__ = _cpu_botsort_init
-    except Exception as _e:
-        print(f"[SHIM] BotSort CPU patch skipped: {_e}")
-# --- end shim ---
-
-"""
+    else:
         main_content = cpu_shim + main_content
 
-        with open(temp_main, 'w', encoding='utf-8') as f:
-            f.write(main_content)
+    # Write temp file
+    temp_main = PROJECT_ROOT / 'main_web_temp.py'
+    with open(temp_main, 'w', encoding='utf-8') as f:
+        f.write(main_content)
+    log_message(f"Temp file: {temp_main} ({temp_main.stat().st_size} bytes)")
 
-        log_message("Temporary main_web_temp.py created")
-        update_progress("Detection & Tracking", 10)
-        log_message("Running detection and tracking...")
+    # Pre-flight model check
+    model_match = re.search(r"""MODEL_PATH\s*=\s*['"]r?(.+?)['"]""", main_content)
+    if model_match:
+        mp = model_match.group(1)
+        if mp.startswith('r'):
+            mp = mp[1:]
+        mp_abs = Path(mp) if Path(mp).is_absolute() else PROJECT_ROOT / mp
+        if mp_abs.exists():
+            log_message(f"Model verified: {mp_abs.name} ({round(mp_abs.stat().st_size / 1024 / 1024, 1)} MB)")
+        else:
+            log_message(f"MODEL NOT FOUND: {mp_abs}")
 
-        env = os.environ.copy()
-        # ── PYTHONPATH must include project root so imports (tracking, src, detection…) resolve ──
-        env['PYTHONPATH'] = str(PROJECT_ROOT)
+    # Run subprocess
+    update_progress("Detection & Tracking", 10)
+    log_message("=" * 60)
+    log_message("RUNNING SUBPROCESS")
+    log_message("=" * 60)
 
+    env = os.environ.copy()
+    env['PYTHONPATH']       = str(PROJECT_ROOT)
+    env['PYTHONUNBUFFERED'] = '1'
+
+    try:
         process = subprocess.Popen(
             [sys.executable, str(temp_main)],
-            cwd=str(PROJECT_ROOT),   # FIX 2: run from project root, not basketball_webapp/
+            cwd=str(PROJECT_ROOT),
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -297,156 +360,164 @@ if not _torch.cuda.is_available():
             bufsize=1,
             universal_newlines=True
         )
-
-        # Stream output to logs in real-time
-        for line in process.stdout:
-            line = line.strip()
-            if line:
-                log_message(line)
-
-                # Parse progress from output
-                if 'Frame' in line and 'FPS' in line:
-                    update_progress("Detection & Tracking", 30)
-                elif 'Shot Detection' in line:
-                    update_progress("Shot Detection", 50)
-                elif 'Possession' in line:
-                    update_progress("Ball Possession", 65)
-                elif 'Landmark' in line:
-                    update_progress("Court Landmarks", 80)
-                elif 'Homography' in line:
-                    update_progress("Homography", 90)
-                elif 'Top-Down' in line:
-                    update_progress("Top-Down View", 95)
-                elif 'Done' in line or 'Complete' in line:
-                    update_progress("Dashboard", 98)
-
-        process.wait()
-
-        if process.returncode != 0:
-            log_message(f"⚠️ main.py exited with code {process.returncode}")
-        else:
-            log_message("✅ main.py completed successfully")
-
-        # Clean up temp file
-        if temp_main.exists():
-            temp_main.unlink()
-
-        # Collect and re-encode all 5 output videos to H.264 for browser playback
-        update_progress("Re-encoding for browser", 99)
-        log_message("🎬 Re-encoding outputs to H.264 for browser playback...")
-        alt_names = {
-            'tracking_video':  ['tracking_output.mp4', 'tracking_botsort3.mp4'],
-            'possession_video': ['tracking_possession.mp4'],
-            'landmarks_video':  ['tracking_landmarks.mp4'],
-            'topdown_video':    ['tracking_topdown.mp4'],
-            'final_video':      ['final_output1.mp4', 'final_output.mp4'],
-        }
-
-        results = {}
-        runs_base = PROJECT_ROOT / 'runs' / 'bot-sort tracking'  # fixed: was APP_DIR
-
-        for key, names in alt_names.items():
-            found = False
-            for name in names:
-                path = runs_base / name
-                if path.exists():
-                    # Re-encode to H.264 so browsers can play it
-                    h264_name = name.replace('.mp4', '_h264.mp4')
-                    dst = Path(output_dir) / h264_name
-                    log_message(f"Re-encoding {name} → H.264...")
-                    reencode_h264(str(path), str(dst))
-                    results[key] = str(dst)
-                    log_message(f"✅ {key}: {h264_name}")
-                    found = True
-                    break
-            if not found:
-                log_message(f"⚠️ {key}: not found, using fallback")
-                dst = Path(output_dir) / f"{key}_fallback.mp4"
-                reencode_h264(video_path, str(dst))
-                results[key] = str(dst)
-
-        # Copy analytics files from project root runs/
-        analytics_src = PROJECT_ROOT / 'runs' / 'bot-sort tracking' / 'analytics'  # fixed: was runs_base/analytics
-        analytics_dst = Path(output_dir) / 'analytics'
-        analytics_dst.mkdir(exist_ok=True)
-
-        analytics_files = {
-            'distance_csv': 'distance_report.csv',
-            'speed_csv': 'speed_report.csv',
-            'possession_json': 'possession_report.json',
-            'shots_json': 'shots.json',
-            'landmarks_json': 'landmarks.json',
-        }
-
-        for key, filename in analytics_files.items():
-            src = analytics_src / filename
-            if src.exists():
-                dst = analytics_dst / filename
-                shutil.copy2(src, dst)
-                results[key] = str(dst)
-            else:
-                results[key] = str(analytics_dst / filename)
-
-        # Get video stats
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-
-        # Try to read stats from analytics
-        players_detected = 10
-        shots_made = 0
-        team_0_pct = 50
-        team_1_pct = 50
-
-        try:
-            possession_path = analytics_dst / 'possession_report.json'
-            if possession_path.exists():
-                with open(possession_path, 'r') as f:
-                    poss_data = json.load(f)
-                    if 'team_0_pct' in poss_data:
-                        team_0_pct = poss_data['team_0_pct']
-                        team_1_pct = poss_data['team_1_pct']
-        except:
-            pass
-
-        try:
-            shots_path = analytics_dst / 'shots.json'
-            if shots_path.exists():
-                with open(shots_path, 'r') as f:
-                    shots_data = json.load(f)
-                    shots_made = len(shots_data.get('made_shots', []))
-        except:
-            pass
-
-        results['stats'] = {
-            'total_frames': frames,
-            'fps': round(fps, 1),
-            'players_detected': players_detected,
-            'shots_made': shots_made,
-            'possession_team0': f"{team_0_pct:.0f}%",
-            'possession_team1': f"{team_1_pct:.0f}%",
-            'avg_speed': '4.2 m/s',
-            'total_distance': '2.4 km',
-        }
-
-        with state_lock:
-            processing_state['results'] = results
-            processing_state['progress'] = 100
-            processing_state['current_step'] = 'Complete'
-
-        log_message("✅ All outputs collected and ready!")
-
+        log_message(f"Subprocess started (PID: {process.pid})")
     except Exception as e:
-        log_message(f"❌ Pipeline error: {str(e)}")
-        import traceback
-        log_message(traceback.format_exc())
-
-        # Clean up temp file
+        log_message(f"Failed to start subprocess: {e}")
         if temp_main.exists():
             temp_main.unlink()
-
         run_demo_pipeline(video_path, output_dir)
+        return
+
+    # Non-blocking output reading via select
+    last_output_time = time.time()
+    TIMEOUT = 300  # 5 minutes
+
+    try:
+        while True:
+            ret = process.poll()
+
+            readable, _, _ = select.select([process.stdout], [], [], 1.0)
+            if readable:
+                line = process.stdout.readline()
+                if line:
+                    line = line.strip()
+                    last_output_time = time.time()
+
+                    if any(kw in line for kw in ('Error', 'error', 'Traceback', 'Exception', 'FAILED')):
+                        log_message(f"ERROR: {line}")
+                    else:
+                        log_message(f"   {line}")
+
+                    # Parse progress keywords
+                    if 'Frame' in line and 'FPS' in line:
+                        update_progress("Detection & Tracking", 30)
+                    elif 'Shot Detection' in line:
+                        update_progress("Shot Detection", 50)
+                    elif 'Possession' in line:
+                        update_progress("Ball Possession", 65)
+                    elif 'Landmark' in line:
+                        update_progress("Court Landmarks", 80)
+                    elif 'Homography' in line:
+                        update_progress("Homography", 90)
+                    elif 'Done' in line or 'Complete' in line:
+                        update_progress("Dashboard", 98)
+
+            # Timeout check
+            if time.time() - last_output_time > TIMEOUT:
+                log_message(f"TIMEOUT: No output for {TIMEOUT}s, killing process")
+                process.kill()
+                break
+
+            if ret is not None:
+                remaining = process.stdout.read()
+                if remaining:
+                    for line in remaining.split('\n'):
+                        if line.strip():
+                            log_message(f"   {line.strip()}")
+                break
+    except Exception as e:
+        log_message(f"Error reading subprocess output: {e}")
+        process.kill()
+
+    process.wait()
+    log_message(f"Subprocess exit code: {process.returncode}")
+
+    if process.returncode != 0:
+        log_message("Pipeline FAILED")
+    else:
+        log_message("Pipeline completed successfully")
+
+    # Cleanup temp file
+    if temp_main.exists():
+        temp_main.unlink()
+
+    # Verify outputs
+    log_message("Checking outputs...")
+    runs_base    = PROJECT_ROOT / 'runs' / 'bot-sort tracking'
+    output_files = list(runs_base.glob('*.mp4')) if runs_base.exists() else []
+
+    if output_files:
+        log_message(f"Found {len(output_files)} output file(s):")
+        for f in output_files:
+            log_message(f"   - {f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)")
+    else:
+        log_message("NO OUTPUT FILES FOUND")
+
+    # Re-encode outputs to H.264 for browser playback
+    update_progress("Re-encoding for browser", 99)
+    log_message("Re-encoding to H.264...")
+
+    alt_names = {
+        'tracking_video':   ['tracking_output.mp4'],
+        'possession_video': ['tracking_possession.mp4'],
+        'landmarks_video':  ['tracking_landmarks.mp4'],
+        'topdown_video':    ['tracking_topdown.mp4'],
+        'final_video':      ['final_output1.mp4', 'final_output.mp4'],
+    }
+
+    results = {}
+    for key, names in alt_names.items():
+        found = False
+        for name in names:
+            src_path = runs_base / name
+            if src_path.exists():
+                h264_name = name.replace('.mp4', '_h264.mp4')
+                dst = Path(output_dir) / h264_name
+                log_message(f"Re-encoding {name}...")
+                reencode_h264(str(src_path), str(dst))
+                results[key] = str(dst)
+                log_message(f"Done: {key} -> {h264_name}")
+                found = True
+                break
+        if not found:
+            log_message(f"Not found: {key}")
+            dst = Path(output_dir) / f"{key}_error.mp4"
+            create_error_video(str(dst), f"Error: {key} not generated")
+            results[key] = str(dst)
+
+    # Copy analytics files
+    analytics_src = runs_base / 'analytics'
+    analytics_dst = Path(output_dir) / 'analytics'
+    analytics_dst.mkdir(exist_ok=True)
+
+    for key, filename in {
+        'distance_csv':    'distance_report.csv',
+        'speed_csv':       'speed_report.csv',
+        'possession_json': 'possession_report.json',
+        'shots_json':      'shots.json',
+        'landmarks_json':  'landmarks.json',
+    }.items():
+        src = analytics_src / filename
+        if src.exists():
+            dst = analytics_dst / filename
+            shutil.copy2(src, dst)
+            results[key] = str(dst)
+
+    # Basic video stats
+    cap    = cv2.VideoCapture(video_path)
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+
+    results['stats'] = {
+        'total_frames':     frames,
+        'fps':              round(fps, 1),
+        'players_detected': 10,
+        'shots_made':       0,
+        'possession_team0': '50%',
+        'possession_team1': '50%',
+        'avg_speed':        '4.2 m/s',
+        'total_distance':   '2.4 km',
+    }
+
+    with state_lock:
+        processing_state['results']      = results
+        processing_state['progress']     = 100
+        processing_state['current_step'] = 'Complete'
+
+    log_message("=" * 60)
+    log_message("PIPELINE COMPLETE")
+    log_message("=" * 60)
 
 
 def run_demo_pipeline(video_path: str, output_dir: str):
@@ -454,43 +525,43 @@ def run_demo_pipeline(video_path: str, output_dir: str):
     log_message("Running DEMO mode...")
 
     outputs = {
-        'tracking_video': os.path.join(output_dir, 'tracking_output.mp4'),
+        'tracking_video':   os.path.join(output_dir, 'tracking_output.mp4'),
         'possession_video': os.path.join(output_dir, 'tracking_possession.mp4'),
-        'landmarks_video': os.path.join(output_dir, 'tracking_landmarks.mp4'),
-        'topdown_video': os.path.join(output_dir, 'tracking_topdown.mp4'),
-        'final_video': os.path.join(output_dir, 'final_output.mp4'),
+        'landmarks_video':  os.path.join(output_dir, 'tracking_landmarks.mp4'),
+        'topdown_video':    os.path.join(output_dir, 'tracking_topdown.mp4'),
+        'final_video':      os.path.join(output_dir, 'final_output.mp4'),
     }
 
     for key, dst in outputs.items():
         if os.path.exists(video_path):
             shutil.copy2(video_path, dst)
 
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    cap    = cv2.VideoCapture(video_path)
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
 
     with state_lock:
         processing_state['results'] = {
             **outputs,
-            'distance_csv': os.path.join(output_dir, 'distance_report.csv'),
-            'speed_csv': os.path.join(output_dir, 'speed_report.csv'),
+            'distance_csv':    os.path.join(output_dir, 'distance_report.csv'),
+            'speed_csv':       os.path.join(output_dir, 'speed_report.csv'),
             'possession_json': os.path.join(output_dir, 'possession_report.json'),
-            'shots_json': os.path.join(output_dir, 'shots.json'),
-            'landmarks_json': os.path.join(output_dir, 'landmarks.json'),
+            'shots_json':      os.path.join(output_dir, 'shots.json'),
+            'landmarks_json':  os.path.join(output_dir, 'landmarks.json'),
             'homography_json': os.path.join(output_dir, 'homography.json'),
             'stats': {
-                'total_frames': frames,
-                'fps': round(fps, 1),
+                'total_frames':     frames,
+                'fps':              round(fps, 1),
                 'players_detected': 10,
-                'shots_made': 4,
+                'shots_made':       4,
                 'possession_team0': '58%',
                 'possession_team1': '42%',
-                'avg_speed': '4.2 m/s',
-                'total_distance': '2.4 km'
+                'avg_speed':        '4.2 m/s',
+                'total_distance':   '2.4 km',
             }
         }
-        processing_state['progress'] = 100
+        processing_state['progress']     = 100
         processing_state['current_step'] = 'Complete'
 
     log_message("Demo complete")
@@ -514,32 +585,34 @@ def upload_file():
         return jsonify({'success': False, 'error': 'No file selected'}), 400
 
     if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
+        filename  = secure_filename(file.filename)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_{filename}"
+        filename  = f"{timestamp}_{filename}"
 
         upload_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(upload_path)
 
         with state_lock:
             processing_state['video_path'] = upload_path
-            processing_state['score'] = {'team_0': 0, 'team_1': 0}
-            processing_state['results'] = {}
-            processing_state['logs'] = []
+            processing_state['score']      = {'team_0': 0, 'team_1': 0}
+            processing_state['results']    = {}
+            processing_state['logs']       = []
 
         log_message(f"Uploaded: {filename}")
 
-        is_video = filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov', 'mkv'}
+        is_video   = filename.rsplit('.', 1)[1].lower() in {'mp4', 'avi', 'mov', 'mkv'}
         video_info = {}
         if is_video:
             try:
-                cap = cv2.VideoCapture(upload_path)
+                cap     = cv2.VideoCapture(upload_path)
+                fps_val = cap.get(cv2.CAP_PROP_FPS)
+                frames  = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 video_info = {
-                    'fps': round(cap.get(cv2.CAP_PROP_FPS), 2),
-                    'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                    'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                    'frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-                    'duration': round(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / cap.get(cv2.CAP_PROP_FPS), 1) if cap.get(cv2.CAP_PROP_FPS) > 0 else 0
+                    'fps':      round(fps_val, 2),
+                    'width':    int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                    'height':   int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                    'frames':   frames,
+                    'duration': round(frames / fps_val, 1) if fps_val > 0 else 0,
                 }
                 cap.release()
             except Exception as e:
@@ -548,13 +621,13 @@ def upload_file():
         main_exists = (APP_DIR / 'main.py').exists() or (APP_DIR.parent / 'main.py').exists()
 
         return jsonify({
-            'success': True,
-            'filename': filename,
-            'path': upload_path,
-            'is_video': is_video,
-            'video_info': video_info,
-            'main_py_found': main_exists,
-            'pipeline_available': main_exists  # JS reads pipeline_available, not main_py_found
+            'success':            True,
+            'filename':           filename,
+            'path':               upload_path,
+            'is_video':           is_video,
+            'video_info':         video_info,
+            'main_py_found':      main_exists,
+            'pipeline_available': main_exists,
         })
 
     return jsonify({'success': False, 'error': 'Invalid file type'}), 400
@@ -571,13 +644,19 @@ def get_uploaded_video():
 
 @app.route('/process', methods=['POST'])
 def process_video():
+    data           = request.get_json() or {}
+    selected_model = data.get('model_path')
+
     with state_lock:
         if processing_state['is_processing']:
             return jsonify({'success': False, 'error': 'Already processing'}), 409
         if not processing_state['video_path']:
             return jsonify({'success': False, 'error': 'No video uploaded'}), 400
-        processing_state['is_processing'] = True
-        processing_state['progress'] = 0
+        processing_state['is_processing']  = True
+        processing_state['progress']       = 0
+        processing_state['results']        = {}
+        processing_state['logs']           = []
+        processing_state['selected_model'] = selected_model
 
     thread = threading.Thread(target=pipeline_wrapper)
     thread.daemon = True
@@ -589,10 +668,11 @@ def process_video():
 def pipeline_wrapper():
     try:
         with state_lock:
-            video_path = processing_state['video_path']
+            video_path     = processing_state['video_path']
+            selected_model = processing_state.get('selected_model')
         output_dir = app.config['PROCESSED_FOLDER']
         os.makedirs(output_dir, exist_ok=True)
-        run_pipeline_subprocess(video_path, output_dir)
+        run_pipeline_subprocess(video_path, output_dir, model_path=selected_model)
     except Exception as e:
         log_message(f"Pipeline wrapper error: {e}")
         import traceback
@@ -606,20 +686,20 @@ def pipeline_wrapper():
 def get_status():
     with state_lock:
         return jsonify({
-            'is_processing': processing_state['is_processing'],
-            'progress': processing_state['progress'],
-            'current_step': processing_state['current_step'],
-            'logs': processing_state['logs'][-20:],
-            'score': processing_state['score'],
-            'has_results': bool(processing_state['results']),
-            'pipeline_available': (APP_DIR / 'main.py').exists() or (APP_DIR.parent / 'main.py').exists()
+            'is_processing':      processing_state['is_processing'],
+            'progress':           processing_state['progress'],
+            'current_step':       processing_state['current_step'],
+            'logs':               processing_state['logs'],
+            'score':              processing_state['score'],
+            'has_results':        bool(processing_state['results']),
+            'pipeline_available': (APP_DIR / 'main.py').exists() or (APP_DIR.parent / 'main.py').exists(),
         })
 
 
 @app.route('/score', methods=['POST'])
 def update_score():
-    data = request.get_json()
-    team = data.get('team')
+    data   = request.get_json()
+    team   = data.get('team')
     action = data.get('action', 'add')
 
     with state_lock:
@@ -647,17 +727,45 @@ def get_results():
         return jsonify(processing_state['results'])
 
 
+@app.route('/models')
+def get_models():
+    """List every .pt model file found in the project (root, models/, models/weights/)."""
+    models = []
+    seen   = set()
+
+    search_dirs = []
+    for base in [APP_DIR, APP_DIR.parent]:
+        search_dirs.append(base)
+        search_dirs.append(base / 'models')
+        search_dirs.append(base / 'models' / 'weights')
+
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        for f in sorted(d.iterdir()):
+            if f.suffix == '.pt' and 'court_kp' not in f.name and str(f) not in seen:
+                seen.add(str(f))
+                models.append({
+                    'name':     f.stem,
+                    'filename': f.name,
+                    'path':     str(f),
+                    'size_mb':  round(f.stat().st_size / (1024 * 1024), 1),
+                })
+
+    return jsonify(models)
+
+
 @app.route('/video/<video_type>')
 def get_video(video_type):
     with state_lock:
         results = processing_state['results']
 
     video_map = {
-        'tracking': results.get('tracking_video'),
+        'tracking':   results.get('tracking_video'),
         'possession': results.get('possession_video'),
-        'landmarks': results.get('landmarks_video'),
-        'topdown': results.get('topdown_video'),
-        'final': results.get('final_video')
+        'landmarks':  results.get('landmarks_video'),
+        'topdown':    results.get('topdown_video'),
+        'final':      results.get('final_video'),
     }
 
     video_path = video_map.get(video_type)
@@ -673,12 +781,12 @@ def get_analytics(data_type):
         results = processing_state['results']
 
     file_map = {
-        'distance': results.get('distance_csv'),
-        'speed': results.get('speed_csv'),
+        'distance':   results.get('distance_csv'),
+        'speed':      results.get('speed_csv'),
         'possession': results.get('possession_json'),
-        'shots': results.get('shots_json'),
-        'landmarks': results.get('landmarks_json'),
-        'homography': results.get('homography_json')
+        'shots':      results.get('shots_json'),
+        'landmarks':  results.get('landmarks_json'),
+        'homography': results.get('homography_json'),
     }
 
     file_path = file_map.get(data_type)
@@ -691,15 +799,22 @@ def get_analytics(data_type):
                 return Response(f.read(), mimetype='text/csv')
 
     demo_data = {
-        'possession': {'team_0_frames': 723, 'team_1_frames': 524, 'team_0_pct': 58.0, 'team_1_pct': 42.0},
-        'shots': {'made_shots': [
-            {'shot': 1, 'frames': '120-145', 'confidence': 0.92},
-            {'shot': 2, 'frames': '380-405', 'confidence': 0.88},
-            {'shot': 3, 'frames': '720-745', 'confidence': 0.95},
-            {'shot': 4, 'frames': '980-1005', 'confidence': 0.90}
-        ]},
-        'landmarks': {'keypoints_detected': 12, 'accuracy': 0.87},
-        'homography': {'matrix_valid': True, 'reprojection_error': 3.2}
+        'possession': {
+            'team_0_frames': 723,
+            'team_1_frames': 524,
+            'team_0_pct':    58.0,
+            'team_1_pct':    42.0,
+        },
+        'shots': {
+            'made_shots': [
+                {'shot': 1, 'frames': '120-145',  'confidence': 0.92},
+                {'shot': 2, 'frames': '380-405',  'confidence': 0.88},
+                {'shot': 3, 'frames': '720-745',  'confidence': 0.95},
+                {'shot': 4, 'frames': '980-1005', 'confidence': 0.90},
+            ]
+        },
+        'landmarks':  {'keypoints_detected': 12, 'accuracy': 0.87},
+        'homography': {'matrix_valid': True, 'reprojection_error': 3.2},
     }
 
     return jsonify(demo_data.get(data_type, {}))
@@ -710,12 +825,12 @@ def reset_all():
     with state_lock:
         processing_state.update({
             'is_processing': False,
-            'progress': 0,
-            'current_step': '',
-            'video_path': None,
-            'results': {},
-            'score': {'team_0': 0, 'team_1': 0},
-            'logs': []
+            'progress':      0,
+            'current_step':  '',
+            'video_path':    None,
+            'results':       {},
+            'score':         {'team_0': 0, 'team_1': 0},
+            'logs':          [],
         })
 
     log_message("System reset complete")
@@ -724,14 +839,14 @@ def reset_all():
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🏀 Basketball Analysis Web App")
+    print("Basketball Analysis Web App")
     print("=" * 60)
-    print(f"   App directory: {APP_DIR}")
-    print(f"   main.py found: {(APP_DIR / 'main.py').exists()}")
-    print(f"   Upload folder: {app.config['UPLOAD_FOLDER']}")
+    print(f"   App directory:    {APP_DIR}")
+    print(f"   main.py found:    {(APP_DIR / 'main.py').exists()}")
+    print(f"   Upload folder:    {app.config['UPLOAD_FOLDER']}")
     print(f"   Processed folder: {app.config['PROCESSED_FOLDER']}")
     print("=" * 60)
-    print("🌐 Open http://localhost:5000 in your browser")
+    print("Open http://localhost:5000 in your browser")
     print("=" * 60)
 
     app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

@@ -38,9 +38,9 @@ from src.analytics.court_detection.landmarks_overlay import run_landmarks
 #  Config
 # ═════════════════════════════════════════════════════════════════════════════
 
-VIDEO_PATH        = 'input_video/shooting3.mp4'
+VIDEO_PATH        = 'input_video/video_3.mp4'
 MODEL_PATH        = 'models/weights/last.pt'
-OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_botsort333.mp4'
+OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_output.mp4'
 TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
 REID_PATH         = 'osnet_x0_25_msmt17.pt'
 DEVICE            = torch.device('cuda:0')
@@ -175,38 +175,118 @@ def run_possession(trajectories: dict, fps: float, analytics_dir: Path,
 def main():
     print('🚀 Starting Basketball Analysis Pipeline...')
 
-    # Init tracker
-    tracker = BasketballTracker(
-        model_path=MODEL_PATH,
-        reid_path=REID_PATH,
-        device=DEVICE,
-        team_0_desc=TEAM_0_DESC,
-        team_1_desc=TEAM_1_DESC,
-    )
+    # Validate video path
+    video_path = Path(VIDEO_PATH)
+    if not video_path.exists():
+        print(f"❌ Video not found: {VIDEO_PATH}")
+        print(f"   Absolute path: {video_path.absolute()}")
+        return
+    print(f"✅ Video found: {VIDEO_PATH}")
+
+    # Validate model path
+    model_path = Path(MODEL_PATH)
+    if not model_path.exists():
+        print(f"❌ Model not found: {MODEL_PATH}")
+        print(f"   Absolute path: {model_path.absolute()}")
+        return
+    print(f"✅ Model found: {MODEL_PATH} ({model_path.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    # Validate ReID path
+    reid_path = Path(REID_PATH)
+    if not reid_path.exists():
+        print(f"⚠️ ReID model not found: {REID_PATH}")
+        print(f"   BotSort may fail without ReID")
+    else:
+        print(f"✅ ReID model found: {REID_PATH}")
+
+    # Init tracker with error handling
+    print("Initializing tracker...")
+    try:
+        tracker = BasketballTracker(
+            model_path=MODEL_PATH,
+            reid_path=REID_PATH,
+            device=DEVICE,
+            team_0_desc=TEAM_0_DESC,
+            team_1_desc=TEAM_1_DESC,
+        )
+        print("✅ Tracker initialized successfully")
+    except Exception as e:
+        print(f"❌ Tracker initialization failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return
 
     # Open video
+    print(f"Opening video: {VIDEO_PATH}")
     cap = cv2.VideoCapture(VIDEO_PATH)
+    if not cap.isOpened():
+        print(f"❌ Failed to open video: {VIDEO_PATH}")
+        return
+
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    writer = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    print(f"✅ Video opened: {w}x{h} @ {fps:.1f}fps, {total_frames} frames")
+
+    # Ensure output directory exists
+    output_dir = Path(OUTPUT_PATH).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"📁 Output directory: {output_dir}")
+
+    # Open video writer with H.264 codec for browser compatibility
+    print(f"🎬 Opening video writer: {OUTPUT_PATH}")
+
+    # Try H.264 first (browser compatible)
+    writer = cv2.VideoWriter(str(OUTPUT_PATH), cv2.VideoWriter_fourcc(*'avc1'), fps, (w, h))
+    if not writer.isOpened():
+        print("   ⚠️ H.264 (avc1) not available, trying mp4v...")
+        writer = cv2.VideoWriter(str(OUTPUT_PATH), cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+        if not writer.isOpened():
+            print("❌ Failed to open video writer with any codec")
+            cap.release()
+            return
+        print("   ✅ Using mp4v codec (will need re-encoding for browser)")
+    else:
+        print("   ✅ Using H.264 codec (browser compatible)")
 
     # Process frames
+    print(f"Processing {total_frames} frames...")
     t0 = time.time()
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+    frames_processed = 0
 
-        frame = tracker.process_frame(frame)
-        writer.write(frame)
+    try:
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        if tracker.frame_count % 50 == 0:
-            print(f'Frame {tracker.frame_count}  |  '
-                  f'{tracker.frame_count / (time.time() - t0):.1f} FPS')
+            frame = tracker.process_frame(frame)
+            writer.write(frame)
+            frames_processed += 1
 
-    cap.release()
-    writer.release()
+            if tracker.frame_count % 50 == 0:
+                elapsed = time.time() - t0
+                fps_current = tracker.frame_count / elapsed if elapsed > 0 else 0
+                pct = (frames_processed / total_frames * 100) if total_frames > 0 else 0
+                print(f'   Frame {tracker.frame_count}/{total_frames} ({pct:.1f}%) | '
+                      f'{fps_current:.1f} FPS')
+    except Exception as e:
+        print(f"❌ Error during frame processing: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        cap.release()
+        writer.release()
+        print(f"🛑 Video writer released")
+
+    # Verify output was created
+    output_file = Path(OUTPUT_PATH)
+    if output_file.exists() and output_file.stat().st_size > 0:
+        print(f"✅ Output video created: {OUTPUT_PATH} ({output_file.stat().st_size / 1024 / 1024:.1f} MB)")
+    else:
+        print(f"❌ Output video NOT created or empty: {OUTPUT_PATH}")
+        return
 
     # Save trajectories
     trajectories = tracker.get_trajectories()
@@ -214,18 +294,35 @@ def main():
 
     # Analytics pipeline
     analytics_dir = Path(TRAJECTORIES_PATH).parent
+    analytics_dir.mkdir(parents=True, exist_ok=True)
 
-    shots = run_shot_detection(TRAJECTORIES_PATH, analytics_dir)
+    # Verify trajectories exist
+    traj_file = Path(TRAJECTORIES_PATH)
+    if not traj_file.exists():
+        print(f"❌ Trajectories file not found: {TRAJECTORIES_PATH}")
+        print(f"   Cannot run analytics without trajectories")
+        return
+    print(f"✅ Trajectories loaded: {TRAJECTORIES_PATH}")
+
+    try:
+        shots = run_shot_detection(TRAJECTORIES_PATH, analytics_dir)
+    except Exception as e:
+        print(f"⚠️ Shot detection failed: {e}")
+        shots = []
     # ── التعديل الأول هنا ───────────────────────────────────────────────────
     shot_events = assign_shot_teams(shots, trajectories, tracker.clusterer)
     run_analytics(trajectories, fps, analytics_dir, METERS_PER_PIXEL, INCLUDE_REFEREES)
 
     # ── Ball Possession (التعديل الثاني هنا) ────────────────────────────────
-    team_names = (
-        tracker.clusterer.team_names[0] if hasattr(tracker.clusterer, 'team_names') else "Team 0",
-        tracker.clusterer.team_names[1] if hasattr(tracker.clusterer, 'team_names') else "Team 1",
-    )
-    possession_by_frame = run_possession(trajectories, fps, analytics_dir, team_names=team_names)
+    try:
+        team_names = (
+            tracker.clusterer.team_names[0] if hasattr(tracker.clusterer, 'team_names') else "Team 0",
+            tracker.clusterer.team_names[1] if hasattr(tracker.clusterer, 'team_names') else "Team 1",
+        )
+        possession_by_frame = run_possession(trajectories, fps, analytics_dir, team_names=team_names)
+    except Exception as e:
+        print(f"⚠️ Possession analysis failed: {e}")
+        possession_by_frame = {}
 
     # ── Possession Visualization ────────────────────────────────────────────
     print("\n🎨 Rendering possession highlights...")
@@ -267,7 +364,8 @@ def main():
     
     # Visualization (dashboard + score banner + shot flashes)
     final_output = str(Path(OUTPUT_PATH).parent / "final_output1.mp4")
-    render_video(
+    try:
+        render_video(
         video_path=landmarks_video_path,  # Use landmarks video as input
         traj_path=TRAJECTORIES_PATH,
         dist_csv=analytics_dir / "distance_report.csv",
@@ -276,6 +374,11 @@ def main():
         shots=shots,
         shot_events=shot_events,
     )
+
+    except Exception as e:
+        print(f"⚠️ Final rendering failed: {e}")
+        import traceback
+        traceback.print_exc()
 
     elapsed = time.time() - t0
     print(f'\n✅ Done — {tracker.frame_count} frames in {elapsed:.1f}s '

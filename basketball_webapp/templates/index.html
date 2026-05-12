@@ -25,10 +25,6 @@
                 <i class="fas fa-video"></i>
                 <span>Detection & Tracking</span>
             </li>
-            <li class="nav-item" data-screen="homography">
-                <i class="fas fa-chess-board"></i>
-                <span>Homography</span>
-            </li>
             <li class="nav-item" data-screen="landmarks">
                 <i class="fas fa-map-marker-alt"></i>
                 <span>Landmarks</span>
@@ -99,15 +95,16 @@
 
             <!-- Upload Screen -->
             <section class="screen active" id="screen-upload">
-                <div class="upload-area" id="uploadArea">
+                <!-- Using <label for="fileInput"> so click opens file picker natively, no JS needed -->
+                <label class="upload-area" id="uploadArea" for="fileInput">
                     <div class="upload-icon">
                         <i class="fas fa-cloud-upload-alt"></i>
                     </div>
                     <h2>Drop your basketball video here</h2>
                     <p>or click to browse files</p>
                     <span class="file-types">MP4, AVI, MOV, MKV</span>
-                    <input type="file" id="fileInput" accept="video/*" hidden>
-                </div>
+                    <input type="file" id="fileInput" accept="video/*" style="display:none">
+                </label>
 
                 <div class="uploaded-file hidden" id="uploadedFile">
                     <div class="file-info">
@@ -132,6 +129,14 @@
                             <source src="/uploaded_video" type="video/mp4">
                             Your browser does not support the video tag.
                         </video>
+                    </div>
+                </div>
+
+                <!-- Model Selector -->
+                <div class="model-selector hidden" id="modelSelector">
+                    <h3><i class="fas fa-brain"></i> Select Detection Model</h3>
+                    <div class="model-grid" id="modelGrid">
+                        <div class="model-loading"><i class="fas fa-spinner fa-spin"></i> Scanning models folder...</div>
                     </div>
                 </div>
 
@@ -252,67 +257,14 @@
                                 <div class="empty-state">No shots detected yet</div>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </section>
 
-            <!-- Homography Screen -->
-            <section class="screen" id="screen-homography">
-                <div class="split-view">
-                    <div class="view-panel">
-                        <div class="panel-header">
-                            <h3><i class="fas fa-video"></i> Original View</h3>
-                            <span class="badge">Camera Perspective</span>
-                        </div>
-                        <div class="video-wrapper">
-                            <video id="homographyVideo" controls preload="metadata">
-                                <source src="" type="video/mp4">
-                            </video>
-                        </div>
-                    </div>
-
-                    <div class="view-panel">
-                        <div class="panel-header">
-                            <h3><i class="fas fa-chess-board"></i> Top-Down Court View</h3>
-                            <span class="badge">Homography Transform</span>
-                        </div>
-                        <div class="canvas-container" id="topdownCanvas">
-                            <div class="court-diagram" id="courtDiagram">
-                                <div class="court-outline">
-                                    <div class="court-key key-left"></div>
-                                    <div class="court-key key-right"></div>
-                                    <div class="three-point-line left"></div>
-                                    <div class="three-point-line right"></div>
-                                    <div class="center-circle"></div>
-                                    <div class="center-line"></div>
-                                    <div class="hoop hoop-left"></div>
-                                    <div class="hoop hoop-right"></div>
-                                </div>
-                                <div class="players-overlay" id="topdownPlayers"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="homography-controls">
-                    <div class="panel">
-                        <h3><i class="fas fa-sliders-h"></i> Homography Parameters</h3>
-                        <div class="params-grid">
-                            <div class="param-item">
-                                <span class="label">Matrix Valid</span>
-                                <span class="value badge-success" id="matrixValid">Yes</span>
-                            </div>
-                            <div class="param-item">
-                                <span class="label">Reprojection Error</span>
-                                <span class="value" id="reprojError">3.2 px</span>
-                            </div>
-                            <div class="param-item">
-                                <span class="label">Keypoints Used</span>
-                                <span class="value" id="kpUsed">12/12</span>
-                            </div>
-                            <div class="param-item">
-                                <span class="label">RANSAC Threshold</span>
-                                <span class="value">8.0 px</span>
+                        <div class="panel">
+                            <h3 style="cursor:pointer" onclick="togglePipelineLog()">
+                                <i class="fas fa-terminal"></i> Pipeline Log
+                                <i class="fas fa-chevron-down" id="logChevron" style="float:right;font-size:11px;margin-top:3px"></i>
+                            </h3>
+                            <div id="trackingLogPanel" style="display:none;margin-top:10px">
+                                <div id="trackingLogContent" style="font-size:11px;font-family:monospace;max-height:220px;overflow-y:auto;color:var(--text-muted);line-height:1.6"></div>
                             </div>
                         </div>
                     </div>
@@ -514,6 +466,60 @@
             </section>
         </div>
     </main>
+
+    <!-- Pipeline Loading Overlay -->
+    <div class="pipeline-overlay" id="pipelineOverlay">
+        <div class="overlay-content">
+            <!-- Processing state -->
+            <div id="overlayProcessing">
+                <span class="overlay-ball"><i class="fas fa-basketball-ball"></i></span>
+                <h2 class="overlay-title">Analyzing Basketball Footage</h2>
+                <p class="overlay-subtitle" id="overlayStep">Initializing pipeline...</p>
+                <div class="overlay-progress-wrap">
+                    <div class="overlay-progress-bar">
+                        <div class="overlay-progress-fill" id="overlayProgressFill"></div>
+                    </div>
+                    <span class="overlay-progress-pct" id="overlayProgressPct">0%</span>
+                </div>
+                <div class="overlay-steps">
+                    <div class="overlay-step" id="ostep-detection">
+                        <div class="overlay-step-icon"><i class="fas fa-search"></i></div>
+                        <span>Detection</span>
+                    </div>
+                    <div class="overlay-step" id="ostep-tracking">
+                        <div class="overlay-step-icon"><i class="fas fa-route"></i></div>
+                        <span>Tracking</span>
+                    </div>
+                    <div class="overlay-step" id="ostep-shots">
+                        <div class="overlay-step-icon"><i class="fas fa-bullseye"></i></div>
+                        <span>Shots</span>
+                    </div>
+                    <div class="overlay-step" id="ostep-landmarks">
+                        <div class="overlay-step-icon"><i class="fas fa-map-marker-alt"></i></div>
+                        <span>Landmarks</span>
+                    </div>
+                    <div class="overlay-step" id="ostep-homography">
+                        <div class="overlay-step-icon"><i class="fas fa-chess-board"></i></div>
+                        <span>Homography</span>
+                    </div>
+                    <div class="overlay-step" id="ostep-encoding">
+                        <div class="overlay-step-icon"><i class="fas fa-film"></i></div>
+                        <span>Encoding</span>
+                    </div>
+                </div>
+                <div class="overlay-log" id="overlayLog"></div>
+            </div>
+            <!-- Complete state -->
+            <div class="overlay-complete" id="overlayComplete">
+                <div class="overlay-complete-icon"><i class="fas fa-check-circle"></i></div>
+                <h2 class="overlay-title">Analysis Complete!</h2>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 8px;">All videos and analytics are ready.</p>
+                <button class="btn-view-results" onclick="onOverlayViewResults()">
+                    <i class="fas fa-play-circle"></i>&nbsp; View Results
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>

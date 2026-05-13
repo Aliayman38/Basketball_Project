@@ -1,19 +1,8 @@
 """
 src/analytics/court_detection/topdown_view.py
 ───────────────────────────────────────────────
-Renders the top-down basketball court minimap with players projected
-from camera pixels to canvas pixels using per-frame H.
-
-Inspired by abdullahtarek/basketball_analysis tactical_view drawer.
-
-Inputs:
-  - Camera-view video (e.g. final_with_landmarks.mp4)
-  - per-frame keypoints JSON (from landmarks_overlay)
-  - trajectories.json (player pixel positions per frame)
-
-Outputs:
-  - Side-by-side video: camera view | top-down canvas with players
-  - JSON file with each player's canvas-pixel trajectory over time
+Renders side-by-side video: camera view | top-down court with players.
+Uses roboflow/sports library for court drawing and ViewTransformer.
 """
 from __future__ import annotations
 
@@ -26,125 +15,63 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from .court_template import (
-    KP_TO_WORLD,
-    CANVAS_W, CANVAS_H,
-    PX_PER_M_X, PX_PER_M_Y,
-    CY, HALF_X, HOOP_X,
-    PAINT_DEPTH_PX, PAINT_TOP_Y, PAINT_BOT_Y,
-    FT_CIRC_PX,
-    COURT_LENGTH_M, COURT_WIDTH_M,
-)
-from .homography import HomographyTracker, project_point
+try:
+    from sports.basketball import CourtConfiguration, League, draw_court, draw_points_on_court
+    from sports import MeasurementUnit
+    HAS_SPORTS_LIB = True
+except ImportError:
+    HAS_SPORTS_LIB = False
+
+from .court_template import KP_TO_WORLD, VERTICES, COURT_LENGTH_FT, COURT_WIDTH_FT
+from .homography import HomographyTracker, project_points
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Court canvas drawing
-# ─────────────────────────────────────────────────────────────────────────────
-def make_court_canvas() -> np.ndarray:
-    """Build the static top-down basketball court image (background)."""
-    canvas = np.full((CANVAS_H, CANVAS_W, 3), (60, 95, 145), dtype=np.uint8)  # wood color
+def _make_fallback_court(width=800, height=425) -> np.ndarray:
+    canvas = np.full((height, width, 3), (60, 95, 145), dtype=np.uint8)
     line = (255, 255, 255)
-    th = 2
-
-    # Outer rectangle
-    cv2.rectangle(canvas, (0, 0), (CANVAS_W - 1, CANVAS_H - 1), line, th)
-
-    # Half-court line
-    cv2.line(canvas, (HALF_X, 0), (HALF_X, CANVAS_H), line, th)
-
-    # Center circle
-    cv2.circle(canvas, (HALF_X, CY), FT_CIRC_PX, line, th)
-
-    # Left paint
-    cv2.rectangle(canvas, (0, PAINT_TOP_Y), (PAINT_DEPTH_PX, PAINT_BOT_Y), line, th)
-    # Left FT circle
-    cv2.circle(canvas, (PAINT_DEPTH_PX, CY), FT_CIRC_PX, line, th)
-    # Left basket (small filled circle at hoop position)
-    cv2.circle(canvas, (HOOP_X, CY), 4, (0, 0, 200), -1)
-
-    # Right paint (mirrored)
-    right_paint_start = CANVAS_W - PAINT_DEPTH_PX
-    right_hoop_x = CANVAS_W - HOOP_X
-    cv2.rectangle(canvas, (right_paint_start, PAINT_TOP_Y),
-                          (CANVAS_W, PAINT_BOT_Y), line, th)
-    cv2.circle(canvas, (right_paint_start, CY), FT_CIRC_PX, line, th)
-    cv2.circle(canvas, (right_hoop_x, CY), 4, (0, 0, 200), -1)
-
+    sx = width / COURT_LENGTH_FT
+    sy = height / COURT_WIDTH_FT
+    def to_px(x_ft, y_ft):
+        return (int(x_ft * sx), int(y_ft * sy))
+    cv2.rectangle(canvas, to_px(0, 0), to_px(94, 50), line, 2)
+    cv2.line(canvas, to_px(47, 0), to_px(47, 50), line, 2)
+    cv2.circle(canvas, to_px(47, 25), int(6 * (sx + sy) / 2), line, 2)
+    cv2.rectangle(canvas, to_px(0, 17), to_px(19, 33), line, 2)
+    cv2.rectangle(canvas, to_px(75, 17), to_px(94, 33), line, 2)
+    cv2.circle(canvas, to_px(19, 25), int(6 * (sx + sy) / 2), line, 2)
+    cv2.circle(canvas, to_px(75, 25), int(6 * (sx + sy) / 2), line, 2)
+    cv2.circle(canvas, to_px(5.25, 25), 4, (0, 0, 200), -1)
+    cv2.circle(canvas, to_px(88.75, 25), 4, (0, 0, 200), -1)
     return canvas
 
 
-def draw_player_dot(
-    canvas:  np.ndarray,
-    canvas_xy: tuple[float, float],
-    color:   tuple[int, int, int] = (0, 255, 255),
-    label:   Optional[str] = None,
-    radius:  int = 7,
-) -> np.ndarray:
-    """Plot one player on the canvas, with bounds checking."""
-    x, y = canvas_xy
-
-    # Soft clamp to canvas (small margin for visibility)
-    margin = 5
-    if not (-margin < x < CANVAS_W + margin and -margin < y < CANVAS_H + margin):
-        return canvas
-
-    x_i = int(max(0, min(CANVAS_W - 1, x)))
-    y_i = int(max(0, min(CANVAS_H - 1, y)))
-
-    cv2.circle(canvas, (x_i, y_i), radius,     color,     -1)
-    cv2.circle(canvas, (x_i, y_i), radius + 1, (0, 0, 0),  1)
-    if label:
-        cv2.putText(canvas, label, (x_i + radius + 2, y_i - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3, cv2.LINE_AA)
-        cv2.putText(canvas, label, (x_i + radius + 2, y_i - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.42, color,    1, cv2.LINE_AA)
-    return canvas
-
-
-def _team_color(team_name: str) -> tuple[int, int, int]:
-    """Map team string to BGR color for the minimap dot."""
+def _team_color_bgr(team_name: str) -> tuple:
     if not team_name:
         return (200, 200, 200)
-    t = team_name.lower()
-    if "yellow" in t:  return (0, 255, 255)
-    if "blue"   in t:  return (255, 100, 0)
-    if "white"  in t:  return (240, 240, 240)
-    if "red"    in t:  return (0, 0, 220)
-    if "dark"   in t:  return (100, 60, 30)
+    t = team_name.strip().lower()
+    if t in ("t1", "team 0", "team0"):  return (0, 255, 255)    # yellow
+    if t in ("t2", "team 1", "team1"):  return (0, 0, 255)      # red
+    if "yellow" in t: return (0, 255, 255)
+    if "blue" in t:   return (255, 100, 0)
+    if "white" in t:  return (240, 240, 240)
+    if "red" in t:    return (0, 0, 220)
+    if "dark" in t:   return (100, 60, 30)
     return (180, 180, 180)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Main render function
-# ─────────────────────────────────────────────────────────────────────────────
 def render_topdown_video(
     input_video_path:  str,
     output_video_path: str,
     keypoints_json:    str,
     trajectories_json: Optional[str] = None,
 ) -> dict:
-    """
-    Produce a side-by-side video: input video on left, top-down minimap on right.
-
-    Parameters
-    ----------
-    input_video_path   : the camera-view video (e.g. final_with_landmarks.mp4)
-    output_video_path  : where to write the side-by-side result
-    keypoints_json     : path to court_keypoints.json (from landmarks_overlay)
-    trajectories_json  : path to trajectories.json (player tracking output)
-
-    Returns
-    -------
-    summary dict with homography stats and processing time.
-    """
-    # Load per-frame keypoints
+    # ── Load per-frame keypoints ────────────────────────────────────────
     with open(keypoints_json) as f:
         kp_data = json.load(f)
-    per_frame_kps = kp_data["per_frame"]
+    per_frame_kps = kp_data.get("per_frame_keypoints", kp_data.get("per_frame", []))
     print(f"[Topdown] Loaded {len(per_frame_kps)} frames of keypoints")
 
-    # Load player trajectories
+    # ── Load player trajectories ────────────────────────────────────────
     frame_to_players: dict[int, list[dict]] = {}
     if trajectories_json and os.path.exists(trajectories_json):
         with open(trajectories_json) as f:
@@ -153,39 +80,46 @@ def render_topdown_video(
             for rec in recs:
                 fi = int(rec["frame"])
                 cx, cy = rec["center"]
-                # Use the BOTTOM-CENTER of the bbox as the foot position
-                # (the "center" field from trajectories is bbox center, so
-                # we approximate foot as a point slightly below center)
-                # If a 'bbox' field is available we'd use that — for now,
-                # center is a reasonable approximation for the foot point
-                foot = (float(cx), float(cy))
                 frame_to_players.setdefault(fi, []).append({
                     "id":   str(pid),
-                    "foot": foot,
+                    "foot": (float(cx), float(cy)),
                     "team": rec.get("team", ""),
                 })
         print(f"[Topdown] Loaded trajectories for "
-              f"{len(traj.get('players', {}))} players")
+              f"{len(traj.get('players', {}))} players, "
+              f"{len(frame_to_players)} frames with data")
 
-    # Open input video
+    # ── Build court image ───────────────────────────────────────────────
+    if HAS_SPORTS_LIB:
+        config = CourtConfiguration(
+            league=League.NBA, measurement_unit=MeasurementUnit.FEET)
+        base_court = draw_court(config=config)
+        print(f"[Topdown] Court image: {base_court.shape} (roboflow/sports)")
+    else:
+        base_court = _make_fallback_court()
+        print(f"[Topdown] Court image: {base_court.shape} (fallback)")
+
+    court_h, court_w = base_court.shape[:2]
+    court_scale_x = court_w / COURT_LENGTH_FT
+    court_scale_y = court_h / COURT_WIDTH_FT
+
+    # ── Open input video ────────────────────────────────────────────────
     cap = cv2.VideoCapture(input_video_path)
     if not cap.isOpened():
         raise FileNotFoundError(f"Cannot open: {input_video_path}")
-    fps   = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    in_w  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    in_h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    in_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    in_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Side-by-side output: scale minimap to match video height
     mini_h = in_h
-    mini_w = int(CANVAS_W * (mini_h / CANVAS_H))
+    mini_w = int(court_w * (mini_h / court_h))
     out_w  = in_w + mini_w
 
     os.makedirs(os.path.dirname(os.path.abspath(output_video_path)) or ".",
                 exist_ok=True)
     writer = cv2.VideoWriter(
-        output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, in_h)
-    )
+        output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_w, in_h))
     if not writer.isOpened():
         cap.release()
         raise RuntimeError(f"Cannot open writer for: {output_video_path}")
@@ -193,12 +127,10 @@ def render_topdown_video(
     print(f"[Topdown] Input: {in_w}x{in_h} @ {fps:.1f} fps, {n_total} frames")
     print(f"[Topdown] Output: {out_w}x{in_h}")
 
-    # Precompute the static canvas (court schematic doesn't change)
-    base_canvas = make_court_canvas()
-
-    # Init the homography tracker
-    tracker = HomographyTracker(KP_TO_WORLD, min_correspondences=4,
-                                 ransac_threshold_px=10.0, validate=True)
+    # ── Homography tracker ──────────────────────────────────────────────
+    tracker = HomographyTracker(
+        vertices=VERTICES, conf_threshold=0.5,
+        min_correspondences=4, max_stale_frames=60)
 
     fi = 0
     t0 = time.time()
@@ -210,56 +142,72 @@ def render_topdown_video(
             if not ok:
                 break
 
-            # This frame's keypoints
+            # Parse keypoints (handle both dict and list format)
             if fi < len(per_frame_kps):
                 raw = per_frame_kps[fi]
-                keypoints = [(int(kp["idx"]), float(kp["x"]), float(kp["y"]),
-                              float(kp["conf"])) for kp in raw]
+                keypoints = []
+                for kp in raw:
+                    if isinstance(kp, dict):
+                        keypoints.append((int(kp['idx']), float(kp['x']),
+                                          float(kp['y']), float(kp['conf'])))
+                    else:
+                        keypoints.append((int(kp[0]), float(kp[1]),
+                                          float(kp[2]), float(kp[3])))
             else:
                 keypoints = []
 
-            H = tracker.update(keypoints)
+            transformer = tracker.update(keypoints)
 
-            # Build minimap
-            mini = base_canvas.copy()
+            # Build court minimap
+            court = base_court.copy()
 
-            if H is not None and fi in frame_to_players:
-                for player in frame_to_players[fi]:
-                    foot_pix = player["foot"]
+            if transformer is not None and fi in frame_to_players:
+                players = frame_to_players[fi]
+                foot_pixels = np.array(
+                    [p["foot"] for p in players], dtype=np.float32)
+
+                if len(foot_pixels) > 0:
                     try:
-                        canvas_xy = project_point(foot_pix, H)
+                        court_xy = project_points(foot_pixels, transformer)
+
+                        for p, (cx, cy) in zip(players, court_xy):
+                            px = int(cx * court_scale_x)
+                            py = int(cy * court_scale_y)
+
+                            if -20 < px < court_w + 20 and -20 < py < court_h + 20:
+                                px = max(0, min(court_w - 1, px))
+                                py = max(0, min(court_h - 1, py))
+                                color = _team_color_bgr(p["team"])
+
+                                cv2.circle(court, (px, py), 20, color, -1)
+                                cv2.circle(court, (px, py), 22, (0, 0, 0), 2)
+                                cv2.putText(
+                                    court, p["id"], (px + 24, py - 8),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                    (0, 0, 0), 3, cv2.LINE_AA)
+                                cv2.putText(
+                                    court, p["id"], (px + 24, py - 8),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                    color, 1, cv2.LINE_AA)
+
+                            world_trajectories.setdefault(p["id"], []).append({
+                                "frame": fi,
+                                "x_ft": float(cx),
+                                "y_ft": float(cy),
+                                "team": p["team"],
+                            })
                     except Exception:
-                        continue
-                    color = _team_color(player["team"])
-                    draw_player_dot(mini, canvas_xy,
-                                    color=color, label=player["id"])
-                    # Save for export
-                    world_trajectories.setdefault(player["id"], []).append({
-                        "frame":  fi,
-                        "x_canvas": canvas_xy[0],
-                        "y_canvas": canvas_xy[1],
-                        "team":   player["team"],
-                    })
+                        pass
 
-            # HUD on minimap
-            status = "FRESH" if (tracker.frames_since_fresh == 0 and H is not None) \
-                     else ("REUSED" if H is not None else "NO H")
-            cv2.rectangle(mini, (0, 0), (CANVAS_W, 24), (20, 20, 20), -1)
-            cv2.putText(mini, "TOP-DOWN VIEW", (8, 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-            cv2.putText(mini, f"H: {status}", (CANVAS_W - 110, 16),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-            if status == "FRESH":
-                cv2.circle(mini, (CANVAS_W - 15, 12), 4, (0, 255, 0), -1)
-            elif status == "REUSED":
-                cv2.circle(mini, (CANVAS_W - 15, 12), 4, (0, 165, 255), -1)
-            else:
-                cv2.circle(mini, (CANVAS_W - 15, 12), 4, (0, 0, 255), -1)
+            # HUD
+            status = "FRESH" if (tracker.frames_since_fresh == 0 and transformer is not None) \
+                     else ("REUSED" if transformer is not None else "NO H")
+            cv2.rectangle(court, (0, 0), (court_w, 30), (20, 20, 20), -1)
+            cv2.putText(court, f"TOP-DOWN VIEW   H: {status}", (10, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
-            # Resize minimap to match input video height
-            mini_resized = cv2.resize(mini, (mini_w, mini_h),
+            mini_resized = cv2.resize(court, (mini_w, mini_h),
                                      interpolation=cv2.INTER_AREA)
-
             combined = np.hstack([frame, mini_resized])
             writer.write(combined)
 
@@ -272,29 +220,26 @@ def render_topdown_video(
         cap.release()
         writer.release()
 
-    # Save canvas-coordinate trajectories
+    # Save world trajectories
     if world_trajectories:
         out_dir = Path(output_video_path).parent
-        traj_out = out_dir / "trajectories_world.json"
+        traj_out = out_dir / "analytics" / "trajectories_world.json"
+        traj_out.parent.mkdir(parents=True, exist_ok=True)
         with open(traj_out, "w") as f:
             json.dump({
-                "canvas_w": CANVAS_W,
-                "canvas_h": CANVAS_H,
-                "court_length_m": COURT_LENGTH_M,
-                "court_width_m":  COURT_WIDTH_M,
-                "px_per_m_x": PX_PER_M_X,
-                "px_per_m_y": PX_PER_M_Y,
-                "trajectories": world_trajectories,
+                "court_length_ft": COURT_LENGTH_FT,
+                "court_width_ft":  COURT_WIDTH_FT,
+                "trajectories":    world_trajectories,
             }, f, indent=2)
-        print(f"[Topdown]   Canvas trajectories → {traj_out}")
+        print(f"[Topdown]   World trajectories → {traj_out}")
 
     elapsed = time.time() - t0
-    print(f"\n[Topdown] ✓ {fi} frames in {elapsed:.1f}s")
     summary = tracker.summary()
-    summary["total_frames"]    = fi
+    summary["total_frames"] = fi
     summary["elapsed_seconds"] = elapsed
-    print(f"[Topdown]   Fresh H frames:  {summary['frames_fresh']}")
-    print(f"[Topdown]   Reused H frames: {summary['frames_reused']}")
-    print(f"[Topdown]   No-H frames:     {summary['frames_no_h']}")
-    print(f"[Topdown]   Output:          {output_video_path}")
+    print(f"\n[Topdown] ✓ {fi} frames in {elapsed:.1f}s")
+    print(f"[Topdown]   Fresh H: {summary['frames_fresh']}")
+    print(f"[Topdown]   Reused:  {summary['frames_reused']}")
+    print(f"[Topdown]   No-H:    {summary['frames_no_h']}")
+    print(f"[Topdown]   Output:  {output_video_path}")
     return summary

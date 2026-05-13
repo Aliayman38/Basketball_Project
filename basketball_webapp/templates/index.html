@@ -140,6 +140,38 @@
                     </div>
                 </div>
 
+                <!-- Team Description Config (CLIP) -->
+                <div class="team-config hidden" id="teamConfig">
+                    <h3><i class="fas fa-tshirt"></i> Team Jersey Colors</h3>
+                    <p class="team-config-hint">Enter each team's jersey color or description.</p>
+                    <div class="team-inputs">
+                        <div class="team-input-row">
+                            <div class="team-input-swatch" style="background:#FF8C00;"></div>
+                            <div class="team-input-wrap">
+                                <label for="team0Desc">Team 1</label>
+                                <div class="team-desc-composed">
+                                    <span class="team-desc-static">wearing a</span>
+                                    <input type="text" id="team0Desc" class="team-desc-input team-0-input"
+                                        value="yellow" placeholder="yellow">
+                                    <span class="team-desc-static">jersey</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="team-input-row">
+                            <div class="team-input-swatch" style="background:#2E6BAA;"></div>
+                            <div class="team-input-wrap">
+                                <label for="team1Desc">Team 2</label>
+                                <div class="team-desc-composed">
+                                    <span class="team-desc-static">wearing a</span>
+                                    <input type="text" id="team1Desc" class="team-desc-input team-1-input"
+                                        value="dark blue" placeholder="dark blue">
+                                    <span class="team-desc-static">jersey</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Progress Panel -->
                 <div class="progress-panel hidden" id="progressPanel">
                     <h3><i class="fas fa-cogs"></i> Processing Pipeline</h3>
@@ -253,6 +285,33 @@
 
                         <div class="panel">
                             <h3><i class="fas fa-crosshairs"></i> Detected Shots</h3>
+
+                            <!-- Team counters -->
+                            <div class="shot-counters">
+                                <div class="shot-counter-team">
+                                    <div class="shot-team-dot" style="background:#FF8C00;"></div>
+                                    <span class="shot-team-label">Yellow</span>
+                                    <span class="shot-count" id="shotCountTeam0">0</span>
+                                </div>
+                                <div class="shot-counter-divider">SHOTS</div>
+                                <div class="shot-counter-team">
+                                    <span class="shot-count" id="shotCountTeam1">0</span>
+                                    <span class="shot-team-label">Blue</span>
+                                    <div class="shot-team-dot" style="background:#2E6BAA;"></div>
+                                </div>
+                            </div>
+
+                            <!-- Proportion bar -->
+                            <div class="shot-proportion-bar">
+                                <div class="shot-prop-fill team-0-fill" id="shotPropTeam0" style="width:50%"></div>
+                                <div class="shot-prop-fill team-1-fill" id="shotPropTeam1" style="width:50%"></div>
+                            </div>
+                            <div class="shot-prop-labels">
+                                <span id="shotPropLabelTeam0">—</span>
+                                <span id="shotPropLabelTeam1">—</span>
+                            </div>
+
+                            <!-- Per-shot log -->
                             <div class="shots-list" id="shotsList">
                                 <div class="empty-state">No shots detected yet</div>
                             </div>

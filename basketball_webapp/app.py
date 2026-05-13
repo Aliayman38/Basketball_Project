@@ -50,6 +50,8 @@ processing_state = {
     'score': {'team_0': 0, 'team_1': 0},
     'logs': [],
     'selected_model': None,
+    'team_0_desc': 'a basketball player wearing a yellow jersey',
+    'team_1_desc': 'a basketball player wearing a dark blue jersey',
 }
 
 state_lock = threading.Lock()
@@ -256,7 +258,8 @@ def _read_subprocess_output(process, stop_event):
         log_message(f"⚠️ Output reader error: {e}")
 
 
-def run_pipeline_subprocess(video_path: str, output_dir: str, model_path: str = None):
+def run_pipeline_subprocess(video_path: str, output_dir: str, model_path: str = None,
+                            team_0_desc: str = None, team_1_desc: str = None):
     """
     Run main.py pipeline via subprocess with cross-platform output reading.
     """
@@ -328,6 +331,21 @@ def run_pipeline_subprocess(video_path: str, output_dir: str, model_path: str = 
             main_content
         )
         log_message(f"✅ Patched MODEL_PATH: {model_path}")
+    # Patch TEAM descriptions for CLIP clustering
+    if team_0_desc:
+        main_content = re.sub(
+            r"TEAM_0_DESC\s*=\s*['\"].*?['\"]",
+            f"TEAM_0_DESC = {repr(team_0_desc)}",
+            main_content
+        )
+        log_message(f"✅ Patched TEAM_0_DESC: {team_0_desc}")
+    if team_1_desc:
+        main_content = re.sub(
+            r"TEAM_1_DESC\s*=\s*['\"].*?['\"]",
+            f"TEAM_1_DESC = {repr(team_1_desc)}",
+            main_content
+        )
+        log_message(f"✅ Patched TEAM_1_DESC: {team_1_desc}")
     # Patch DEVICE
     main_content = re.sub(
         r"DEVICE\s*=\s*torch\.device\(['\"]cuda:\d+['\"]\)",
@@ -702,6 +720,8 @@ def get_uploaded_video():
 def process_video():
     data = request.get_json() or {}
     selected_model = data.get('model_path')
+    team_0_desc = data.get('team_0_desc', '').strip() or 'a basketball player wearing a yellow jersey'
+    team_1_desc = data.get('team_1_desc', '').strip() or 'a basketball player wearing a dark blue jersey'
 
     with state_lock:
         if processing_state['is_processing']:
@@ -713,6 +733,8 @@ def process_video():
         processing_state['results']        = {}
         processing_state['logs']           = []
         processing_state['selected_model'] = selected_model
+        processing_state['team_0_desc']    = team_0_desc
+        processing_state['team_1_desc']    = team_1_desc
 
     thread = threading.Thread(target=pipeline_wrapper)
     thread.daemon = True
@@ -726,9 +748,12 @@ def pipeline_wrapper():
         with state_lock:
             video_path     = processing_state['video_path']
             selected_model = processing_state.get('selected_model')
+            team_0_desc    = processing_state.get('team_0_desc', 'a basketball player wearing a yellow jersey')
+            team_1_desc    = processing_state.get('team_1_desc', 'a basketball player wearing a dark blue jersey')
         output_dir = app.config['PROCESSED_FOLDER']
         os.makedirs(output_dir, exist_ok=True)
-        run_pipeline_subprocess(video_path, output_dir, model_path=selected_model)
+        run_pipeline_subprocess(video_path, output_dir, model_path=selected_model,
+                                team_0_desc=team_0_desc, team_1_desc=team_1_desc)
     except Exception as e:
         log_message(f"Pipeline wrapper error: {e}")
         import traceback
@@ -963,7 +988,9 @@ def reset_all():
             'results':        {},
             'score':          {'team_0': 0, 'team_1': 0},
             'logs':           [],
-            'selected_model': None,   # FIX 5: clear stale model on reset
+            'selected_model': None,
+            'team_0_desc':    'a basketball player wearing a yellow jersey',
+            'team_1_desc':    'a basketball player wearing a dark blue jersey',
         })
 
     log_message("System reset complete")

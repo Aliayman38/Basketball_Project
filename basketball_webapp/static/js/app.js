@@ -13,6 +13,10 @@ const state = {
     videoInfo: null,
     pipelineAvailable: false,
     selectedModel: null,
+    teamDescriptions: {
+        team0: 'yellow',
+        team1: 'dark blue',
+    },
     models: [],
 };
 
@@ -126,6 +130,10 @@ async function handleFile(file) {
 function resetForNewVideo() {
     state.results = null;
     state.selectedModel = null;
+    state.teamDescriptions = {
+        team0: 'yellow',
+        team1: 'dark blue',
+    };
 
     // Restore upload area to initial state
     if (elements.uploadArea)   elements.uploadArea.classList.remove('hidden');
@@ -150,6 +158,12 @@ function resetForNewVideo() {
         elements.processBtn.innerHTML = '<i class="fas fa-play"></i> Start Analysis';
     }
     if (elements.modelSelector) elements.modelSelector.classList.add('hidden');
+    const teamConfig = document.getElementById('teamConfig');
+    if (teamConfig) teamConfig.classList.add('hidden');
+    const t0 = document.getElementById('team0Desc');
+    const t1 = document.getElementById('team1Desc');
+    if (t0) t0.value = state.teamDescriptions.team0;
+    if (t1) t1.value = state.teamDescriptions.team1;
     hideOverlay();
 }
 
@@ -201,6 +215,10 @@ async function loadModels() {
 function showModelSelector() {
     if (!elements.modelSelector || !elements.modelGrid) return;
     elements.modelSelector.classList.remove('hidden');
+
+    // Also show team config
+    const teamConfig = document.getElementById('teamConfig');
+    if (teamConfig) teamConfig.classList.remove('hidden');
 
     if (!state.models || state.models.length === 0) {
         elements.modelGrid.innerHTML = '<div class="model-none"><i class="fas fa-exclamation-circle"></i> No model files found in models/weights/</div>';
@@ -332,14 +350,26 @@ async function startProcessing() {
     if (!state.uploadedFile) return;
     elements.processBtn.disabled = true;
     elements.processBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...';
-    showOverlay();  // FIX 4: show overlay immediately
+    showOverlay();
+
+    // Read jersey color from inputs and assemble full CLIP sentence
+    const team0Input = document.getElementById('team0Desc');
+    const team1Input = document.getElementById('team1Desc');
+    const team0Color = (team0Input && team0Input.value.trim()) || state.teamDescriptions.team0;
+    const team1Color = (team1Input && team1Input.value.trim()) || state.teamDescriptions.team1;
+    const team0Desc  = `a basketball player wearing a ${team0Color} jersey`;
+    const team1Desc  = `a basketball player wearing a ${team1Color} jersey`;
+    state.teamDescriptions = { team0: team0Color, team1: team1Color };
 
     try {
-        // FIX 3: Send selected model in request body
         const response = await fetch('/process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model_path: state.selectedModel })
+            body: JSON.stringify({
+                model_path: state.selectedModel,
+                team_0_desc: team0Desc,
+                team_1_desc: team1Desc,
+            })
         });
         const data = await response.json();
         if (data.success) {
@@ -376,6 +406,7 @@ function startStatusPolling() {
                 state.results = await fetch('/results').then(r => r.json());
                 loadAllVideoSources();  // FIX 1: fresh sources for new video
                 loadPlayerStats();      // populate player stats sidebar panel
+                loadShotCounters();     // populate shot counter bar
                 showOverlayComplete();  // FIX 4: show completion
             }
         } catch (err) { console.error('Poll error:', err); }
@@ -408,8 +439,8 @@ function updateProcessingStatus(status) {
 function loadAllVideoSources() {
     const t = Date.now();
     const sources = {
-        trackingVideo:  `/video/tracking?t=${t}`,   // show tracking_possession.mp4
-        landmarksVideo: `/video/landmarks?t=${t}`,    // show tracking_landmarks.mp4
+        trackingVideo:  `/video/possession?t=${t}`,  // tracking_possession.mp4
+        landmarksVideo: `/video/landmarks?t=${t}`,
         finalVideo:     `/video/final?t=${t}`
     };
     Object.entries(sources).forEach(([id, src]) => {
@@ -494,7 +525,7 @@ async function loadDashboardData() {
             updatePossessionChart(possession.team_0_pct, possession.team_1_pct);
         }
         const shots = await fetch('/analytics/shots').then(r => r.json());
-        if (shots.made_shots) { updateShotsList(shots.made_shots); updateShotTable(shots.made_shots); }
+        if (shots.made_shots) { loadShotCounters(); updateShotTable(shots.made_shots); }
         if (state.results && state.results.stats) {
             const s = state.results.stats;
             ['dashPlayers','dashShots','dashSpeed','dashDistance','totalFrames','fps'].forEach(id => {
@@ -520,13 +551,68 @@ function updatePossessionChart(t0, t1) {
     if (l1) l1.textContent=`${t1.toFixed(0)}%`;
 }
 
-function updateShotsList(shots) {
-    const c = document.getElementById('shotsList'); if (!c) return;
-    c.innerHTML = shots.map((s,i) => `<div class="shot-item"><div class="shot-info">
-        <span class="shot-time">Shot ${i+1} • Frames ${s.frames}</span>
-        <span class="shot-team">Team ${i%2===0?'Yellow':'Blue'}</span></div>
-        <span class="shot-conf">${(s.confidence*100).toFixed(0)}%</span></div>`).join('');
+// ── Shot counter bar ──────────────────────────────────────────────────────────
+async function loadShotCounters() {
+    try {
+        const [shotsData, scoresData] = await Promise.all([
+            fetch('/analytics/shots').then(r => r.json()),
+            fetch('/auto_scores').then(r => r.json()).catch(() => ({ team_0: 0, team_1: 0, shot_events: [] }))
+        ]);
+
+        const team0 = scoresData.team_0 || 0;
+        const team1 = scoresData.team_1 || 0;
+        const shotEvents = scoresData.shot_events || [];  // [{frame, team}]
+
+        // Counters
+        const c0 = document.getElementById('shotCountTeam0');
+        const c1 = document.getElementById('shotCountTeam1');
+        if (c0) { c0.textContent = team0; c0.classList.add('pop'); setTimeout(() => c0.classList.remove('pop'), 350); }
+        if (c1) { c1.textContent = team1; c1.classList.add('pop'); setTimeout(() => c1.classList.remove('pop'), 350); }
+
+        // Proportion bar
+        const total = team0 + team1;
+        const pct0 = total > 0 ? (team0 / total * 100) : 50;
+        const pct1 = 100 - pct0;
+        const bar0 = document.getElementById('shotPropTeam0');
+        const bar1 = document.getElementById('shotPropTeam1');
+        const lbl0 = document.getElementById('shotPropLabelTeam0');
+        const lbl1 = document.getElementById('shotPropLabelTeam1');
+        if (bar0) bar0.style.width = `${pct0}%`;
+        if (bar1) bar1.style.width = `${pct1}%`;
+        if (lbl0) lbl0.textContent = total > 0 ? `${pct0.toFixed(0)}%` : '—';
+        if (lbl1) lbl1.textContent = total > 0 ? `${pct1.toFixed(0)}%` : '—';
+
+        // Per-shot log
+        if (shotsData.made_shots) updateShotsList(shotsData.made_shots, shotEvents);
+    } catch (err) { console.error('Shot counters error:', err); }
 }
+
+function updateShotsList(shots, shotEvents) {
+    const c = document.getElementById('shotsList');
+    if (!c) return;
+    if (!shots.length) { c.innerHTML = '<div class="empty-state">No shots detected yet</div>'; return; }
+
+    // Build frame→team map from shot_events
+    const eventMap = {};
+    (shotEvents || []).forEach(e => { eventMap[e.frame] = e.team; });
+
+    c.innerHTML = shots.map((s, i) => {
+        // Match by arc_end_frame if available, else fall back to index parity
+        const endFrame = s.apex_frame || null;
+        let team = eventMap[endFrame] ?? (i % 2);
+        const color = team === 0 ? '#FF8C00' : '#2E6BAA';
+        const label = team === 0 ? 'Yellow' : 'Blue';
+        return `<div class="shot-item">
+            <div class="shot-num">${i + 1}</div>
+            <div class="shot-info">
+                <span class="shot-time">Frames ${s.frames}</span>
+                <span class="shot-team-tag" style="background:${color}22;color:${color}">${label}</span>
+            </div>
+            <span class="shot-conf">${(s.confidence * 100).toFixed(0)}%</span>
+        </div>`;
+    }).join('');
+}
+
 
 function updateShotTable(shots) {
     const t = document.getElementById('shotTableBody'); if (!t) return;

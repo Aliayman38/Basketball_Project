@@ -39,7 +39,7 @@ body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--bg-dark);
     color: var(--text-primary);
-    min-height: 100vh;
+    height: 100vh;
     display: flex;
     overflow: hidden;
 }
@@ -1937,3 +1937,205 @@ body {
 .ps-team-unknown { background: rgba(255,255,255,0.07); color: var(--text-muted); }
 .player-stats-table td.dist-val { color: var(--text-primary); }
 .player-stats-table td.speed-val { color: #FFD580; }
+
+/* ── Shot Counter Bar ────────────────────────────────────────────────────── */
+.shot-counters {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 12px 0 10px;
+    gap: 8px;
+}
+.shot-counter-team {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+}
+.shot-counter-team:last-child { justify-content: flex-end; }
+.shot-team-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.shot-team-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.shot-count {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1;
+    min-width: 28px;
+    text-align: center;
+    transition: transform 0.2s ease;
+}
+.shot-count.pop { transform: scale(1.35); }
+.shot-counter-divider {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* Proportion bar */
+.shot-proportion-bar {
+    display: flex;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--bg-secondary);
+    margin-bottom: 4px;
+}
+.shot-prop-fill {
+    transition: width 0.6s cubic-bezier(.4,0,.2,1);
+    height: 100%;
+}
+.team-0-fill { background: #FF8C00; }
+.team-1-fill { background: #2E6BAA; }
+.shot-prop-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+/* Per-shot log items */
+.shot-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 12px;
+}
+.shot-item:last-child { border-bottom: none; }
+.shot-num {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    min-width: 16px;
+    text-align: center;
+}
+.shot-info { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.shot-time { font-size: 11px; color: var(--text-secondary); }
+.shot-team-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 20px;
+    width: fit-content;
+}
+.shot-conf {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-green, #00FF88);
+}
+
+/* ── Team Jersey Description Config (Upload Screen) ─────────────────────── */
+.team-config {
+    background: var(--bg-card, #2a2a2a);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-top: 16px;
+}
+.team-config h3 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.team-config h3 i { color: var(--primary, #FF8C00); }
+.team-config-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    line-height: 1.5;
+}
+.team-inputs { display: flex; flex-direction: column; gap: 12px; }
+.team-input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.team-input-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+}
+.team-input-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.team-input-wrap label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+/* Inline row: "wearing a" [ input ] "jersey" */
+.team-desc-composed {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-secondary, #1e1e1e);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.team-desc-composed:focus-within.team-0-wrap {
+    border-color: #FF8C00;
+    box-shadow: 0 0 0 3px rgba(255,140,0,0.12);
+}
+.team-desc-composed:focus-within.team-1-wrap {
+    border-color: #2E6BAA;
+    box-shadow: 0 0 0 3px rgba(46,107,170,0.18);
+}
+.team-desc-static {
+    font-size: 13px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    user-select: none;
+}
+.team-desc-input {
+    flex: 1;
+    min-width: 60px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    padding: 0;
+    outline: none;
+}
+.team-desc-input::placeholder { color: var(--text-muted); opacity: 0.5; }
+/* Focus ring on the wrapper, not the bare input */
+.team-input-row:nth-child(1) .team-desc-composed:focus-within {
+    border-color: #FF8C00;
+    box-shadow: 0 0 0 3px rgba(255,140,0,0.12);
+}
+.team-input-row:nth-child(2) .team-desc-composed:focus-within {
+    border-color: #2E6BAA;
+    box-shadow: 0 0 0 3px rgba(46,107,170,0.18);
+}

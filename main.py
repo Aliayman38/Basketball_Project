@@ -37,7 +37,7 @@ from src.analytics.court_detection.landmarks_overlay import run_landmarks
 #  Config
 # ═════════════════════════════════════════════════════════════════════════════
 
-VIDEO_PATH        = 'input_video/shooting2.mp4'
+VIDEO_PATH        = 'input_video/video_3.mp4'
 MODEL_PATH        = 'models/weights/last.pt'
 OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_output.mp4'
 TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
@@ -310,6 +310,19 @@ def main():
         shots = []
     # ── التعديل الأول هنا ───────────────────────────────────────────────────
     shot_events = assign_shot_teams(shots, trajectories, tracker.clusterer)
+
+    # Save scores.json so the webapp can display per-team shot counts
+    scores_data: dict = {"team_0": 0, "team_1": 0, "shot_events": [], "total_shots": len(shots)}
+    for frame, team_idx in shot_events:
+        scores_data["shot_events"].append({"frame": frame, "team": team_idx})
+        if team_idx == 0:
+            scores_data["team_0"] += 1
+        else:
+            scores_data["team_1"] += 1
+    scores_path = analytics_dir / "scores.json"
+    with scores_path.open("w", encoding="utf-8") as f:
+        json.dump(scores_data, f, indent=2)
+    print(f"   Scores → {scores_path}")
     run_analytics(trajectories, fps, analytics_dir, METERS_PER_PIXEL, INCLUDE_REFEREES)
 
     # ── Ball Possession (التعديل الثاني هنا) ────────────────────────────────

@@ -375,6 +375,7 @@ function startStatusPolling() {
                 elements.processBtn.innerHTML = '<i class="fas fa-check"></i> Complete!';
                 state.results = await fetch('/results').then(r => r.json());
                 loadAllVideoSources();  // FIX 1: fresh sources for new video
+                loadPlayerStats();      // populate player stats sidebar panel
                 showOverlayComplete();  // FIX 4: show completion
             }
         } catch (err) { console.error('Poll error:', err); }
@@ -423,8 +424,46 @@ function loadAllVideoSources() {
 }
 
 // =============================================================================
-//  SCORE
+//  PLAYER STATISTICS (Tracking Tab Sidebar)
 // =============================================================================
+async function loadPlayerStats() {
+    try {
+        const data = await fetch('/analytics/player_stats').then(r => r.json());
+        const tbody = document.getElementById('playerStatsBody');
+        if (!tbody) return;
+
+        const players = data.players || [];
+        if (players.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:12px;font-size:12px;color:var(--text-muted)">No player data available</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = players.map(p => {
+            // Determine team badge class
+            let badgeClass = 'ps-team-unknown';
+            let teamLabel  = p.team || '—';
+            const tLower   = teamLabel.toLowerCase();
+            if (tLower.includes('yellow') || tLower === 't1' || tLower === 'team 0') {
+                badgeClass = 'ps-team-0';
+            } else if (tLower.includes('blue') || tLower === 't2' || tLower === 'team 1') {
+                badgeClass = 'ps-team-1';
+            }
+            // Shorten long team names for the badge
+            if (teamLabel.length > 8) teamLabel = teamLabel.slice(0, 8);
+
+            return `<tr>
+                <td>${escHtml(p.id)}</td>
+                <td><span class="ps-team-badge ${badgeClass}">${escHtml(teamLabel)}</span></td>
+                <td class="dist-val">${p.distance}<span style="color:var(--text-muted);font-size:10px"> ${p.distance_unit}</span></td>
+                <td class="speed-val">${p.speed}<span style="color:var(--text-muted);font-size:10px"> ${p.speed_unit}</span></td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        console.error('Player stats error:', err);
+    }
+}
+
+
 async function updateScore(team, action) {
     try {
         if (action === 'reset') {

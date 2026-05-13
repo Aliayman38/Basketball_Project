@@ -259,6 +259,25 @@
                         </div>
 
                         <div class="panel">
+                            <h3><i class="fas fa-table"></i> Player Statistics</h3>
+                            <div class="player-stats-table-wrap">
+                                <table class="player-stats-table" id="playerStatsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Team</th>
+                                            <th>Distance</th>
+                                            <th>Avg Speed</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="playerStatsBody">
+                                        <tr><td colspan="4" class="empty-state" style="text-align:center;padding:12px;font-size:12px;">Run analysis to see stats</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="panel">
                             <h3 style="cursor:pointer" onclick="togglePipelineLog()">
                                 <i class="fas fa-terminal"></i> Pipeline Log
                                 <i class="fas fa-chevron-down" id="logChevron" style="float:right;font-size:11px;margin-top:3px"></i>

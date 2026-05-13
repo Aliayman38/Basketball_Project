@@ -13,7 +13,6 @@ from pathlib import Path
 
 from tracking.tracker import BasketballTracker, TEAM_NAMES_SHORT
 from src.analytics.dashboard import render_video
-from src.analytics.court_detection.topdown_view import render_topdown_video
 # ── Analytics ─────────────────────────────────────────────────────────────────
 import sys
 _src = Path(__file__).parent / "src"
@@ -38,7 +37,7 @@ from src.analytics.court_detection.landmarks_overlay import run_landmarks
 #  Config
 # ═════════════════════════════════════════════════════════════════════════════
 
-VIDEO_PATH        = 'input_video/video_3.mp4'
+VIDEO_PATH        = 'input_video/shooting2.mp4'
 MODEL_PATH        = 'models/weights/last.pt'
 OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_output.mp4'
 TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
@@ -335,31 +334,17 @@ def main():
         fps=fps,
     )
 
-    # ── Court Landmarks ─────────────────────────────────────────────────────
+    # ── Court Landmarks (on clean original video — no tracking overlay) ─────
     print("\n🏀 Running Court Landmark Detection...")
     landmarks_video_path = str(Path(OUTPUT_PATH).parent / "tracking_landmarks.mp4")
     run_landmarks(
-        input_video_path=possession_video_path,
+        input_video_path=VIDEO_PATH,
         output_video_path=landmarks_video_path,
         analytics_dir=analytics_dir,
         weights_path=LANDMARKS_WEIGHTS,
         conf_threshold=LANDMARKS_CONF,
         log_every=30,
     )
-   # ── Top-Down Homography View ────────────────────────────────────────────
-    print("\n🗺️ Rendering top-down minimap (homography)...")
-    topdown_video_path = str(Path(OUTPUT_PATH).parent / "tracking_topdown.mp4")
-    landmarks_json_path = str(analytics_dir / "landmarks.json") # استخدام الاسم الصحيح للملف
-
-    try:
-        render_topdown_video(
-            input_video_path=landmarks_video_path,
-            output_video_path=topdown_video_path,
-            keypoints_json=landmarks_json_path,
-            trajectories_json=TRAJECTORIES_PATH,
-        )
-    except Exception as e:
-        print(f'   ⚠️ Top-down step failed: {e}')
 
     
     # Visualization (dashboard + score banner + shot flashes)

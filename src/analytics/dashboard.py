@@ -229,12 +229,7 @@ def render_video(
     shots: list[ShotResult] | None = None,
     shot_events: list[tuple[int, int]] | None = None,
 ):
-    """Render final video with dashboard, score banner, and shot flashes."""
-
-    frames_data = _load_frame_index(traj_path)
-    dist_data   = _load_csv(dist_csv)
-    speed_data  = _load_csv(speed_csv)
-    player_teams = _load_player_teams(traj_path)
+    """Render final video with score banner and shot flashes (no player dashboard overlay)."""
 
     cap = cv2.VideoCapture(video_path)
     fps    = cap.get(cv2.CAP_PROP_FPS) or 30.0
@@ -245,7 +240,6 @@ def render_video(
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
-    dashboard = PlayerDashboard(width, height, corner="top-right")
     frame_scores = build_frame_scores(shot_events, total) if shot_events else {}
 
     shot_frames: dict[int, list[int]] = defaultdict(list)
@@ -260,22 +254,7 @@ def render_video(
         if not ret:
             break
 
-        # Build visible player stats
-        visible = []
-        for pid, (x, y) in frames_data.get(fidx, {}).items():
-            d, du = _pick(dist_data.get(pid, {}), "total_distance_m", "total_distance_px")
-            s, su = _pick(speed_data.get(pid, {}), "avg_speed_m_s", "avg_speed_px_s")
-            visible.append({
-                "id": pid,
-                "distance": f"{float(d):.1f}{du}",
-                "speed": f"{float(s):.2f}{su}",
-                "team": player_teams.get(pid, "—"),
-            })
-        visible.sort(key=lambda x: int(x["id"]))
-
         # Draw overlays
-        dashboard.draw(frame, visible)
-
         if fidx in shot_frames:
             for sn in shot_frames[fidx]:
                 draw_shot_flash(frame, width, sn)

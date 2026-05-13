@@ -1878,3 +1878,62 @@ body {
     transform: translateY(-2px);
     box-shadow: 0 10px 32px rgba(255, 140, 0, 0.45);
 }
+
+/* ── Player Statistics Table (Tracking Tab Sidebar) ─────────────────────── */
+.player-stats-table-wrap {
+    max-height: 280px;
+    overflow-y: auto;
+    border-radius: var(--radius-sm);
+    scrollbar-width: thin;
+    scrollbar-color: var(--primary) var(--bg-secondary);
+}
+.player-stats-table-wrap::-webkit-scrollbar { width: 4px; }
+.player-stats-table-wrap::-webkit-scrollbar-track { background: var(--bg-secondary); }
+.player-stats-table-wrap::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 2px; }
+
+.player-stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.player-stats-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+}
+.player-stats-table tbody tr {
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.15s;
+}
+.player-stats-table tbody tr:hover { background: rgba(255,255,255,0.04); }
+.player-stats-table tbody td {
+    padding: 7px 8px;
+    color: var(--text-primary);
+    vertical-align: middle;
+}
+.player-stats-table td:first-child {
+    font-weight: 700;
+    color: var(--text-muted);
+    width: 32px;
+}
+.ps-team-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+.ps-team-0 { background: rgba(255,140,0,0.18); color: #FF8C00; }
+.ps-team-1 { background: rgba(46,107,170,0.25); color: #6aadeb; }
+.ps-team-unknown { background: rgba(255,255,255,0.07); color: var(--text-muted); }
+.player-stats-table td.dist-val { color: var(--text-primary); }
+.player-stats-table td.speed-val { color: #FFD580; }

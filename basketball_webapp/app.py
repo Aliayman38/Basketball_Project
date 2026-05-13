@@ -517,11 +517,12 @@ if not _torch.cuda.is_available():
     analytics_dst.mkdir(exist_ok=True)
 
     for key, filename in {
-        'distance_csv':   'distance_report.csv',
-        'speed_csv':      'speed_report.csv',
+        'distance_csv':    'distance_report.csv',
+        'speed_csv':       'speed_report.csv',
         'possession_json': 'possession_report.json',
-        'shots_json':     'shots.json',
-        'landmarks_json': 'landmarks.json',
+        'shots_json':      'shots.json',
+        'scores_json':     'scores.json',
+        'landmarks_json':  'landmarks.json',
     }.items():
         src = analytics_src / filename
         if src.exists():

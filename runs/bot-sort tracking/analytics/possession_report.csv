@@ -1,11 +1,10 @@
 player_id,team,possession_frames,possession_pct
-8,T1,79,16.49
-10,T2,42,8.77
-3,T2,42,8.77
-4,T1,30,6.26
-2,T2,7,1.46
-1,T2,4,0.84
+8,T1,40,16.46
+3,T2,23,9.47
+10,T1,21,8.64
+7,T1,9,3.70
+2,T2,6,2.47
 
 team,possession_frames,possession_pct
-T1,109,22.76
-T2,95,19.83
+T1,70,28.81
+T2,29,11.93

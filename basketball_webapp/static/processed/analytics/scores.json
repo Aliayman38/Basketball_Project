@@ -1,0 +1,11 @@
+{
+  "team_0": 0,
+  "team_1": 1,
+  "shot_events": [
+    {
+      "frame": 210,
+      "team": 1
+    }
+  ],
+  "total_shots": 1
+}

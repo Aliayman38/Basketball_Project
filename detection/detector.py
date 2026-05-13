@@ -1,13 +1,20 @@
-from ultralytics import YOLO
+from ultralytics import YOLO, RTDETR
 import cv2
 import os
+
+def _load_model(model_path: str):
+    """Load YOLO or RT-DETR based on the weight filename."""
+    name = os.path.basename(model_path).lower()
+    if "rtdetr" in name or "rt-detr" in name or "rt_detr" in name:
+        return RTDETR(model_path)
+    return YOLO(model_path)
 
 class BasketballDetector:
     def __init__(self, model_path):
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Weights file not found: {model_path}")
         
-        self.model = YOLO(model_path)
+        self.model = _load_model(model_path)
         # الألوان التي نجحت في الاختبار
         self.colors = {
             "basketball": (0, 200, 255),

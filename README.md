@@ -4,7 +4,7 @@ An AI-powered basketball analytics platform for player tracking, team classifica
 
 The system processes basketball footage and produces real-time analytics overlays, top-down court visualizations, possession tracking, speed and distance statistics, shot detection events, and interactive video outputs through a web-based dashboard.
 
-Built using YOLO, RT-DETR, CLIP, BotSORT, OpenCV, PyTorch, and Flask.
+Built using YOLOv26n, RT-DETR-L, CLIP, BotSORT, OpenCV, PyTorch, and Flask.
 
 Features
 Player, referee, ball, and hoop detection

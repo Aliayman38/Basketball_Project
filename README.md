@@ -28,9 +28,9 @@ An AI-powered system Using YOLOv26n and RT-DETR-L that processes basketball game
 
 | Component | What We Used |
 |---|---|
-| Object Detection | YOLO (nano / large) + RT-DETR — fine-tuned on custom basketball dataset |
+| Object Detection | YOLOv26n + RT-DETR-L — fine-tuned on custom basketball dataset |
 | Tracking | BoT-SORT + OC-SORT with OSNet ReID |
-| Team Classification | K-Means++ on jersey HSV color + CLIP zero-shot verification |
+| Team Classification |`fusion_core.py` combines K-Means++ color signals with CLIP embeddings using confidence-weighted voting to produce the final team assignment|
 | Ball Interpolation | Pandas linear interpolation + rolling average smoothing |
 | Shot Detection | Rim-crossing geometry + ball descent validation |
 | Court Mapping | Homography (OpenCV) + keypoint detection model |
@@ -46,7 +46,7 @@ Basketball_Project/
 ├── basketball_webapp/app.py       # Run the web dashboard
 ├── detection/                     # YOLOv26n / RT-DETR detection wrappers
 ├── tracking/                      # BoT-SORT tracker + ball interpolator
-├── team_clustering/               # K-Means++ + CLIP team assignment
+├── team_clustering/               # K-Means++ + CLIP team assignment +`fusion_core.py`
 ├── src/analytics/                 # Shot detection, possession, speed, distance
 ├── src/analytics/court_detection/ # Homography + top-down view
 ├── src/visualization/             # Overlay and drawing utilities

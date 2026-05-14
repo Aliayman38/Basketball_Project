@@ -39,8 +39,8 @@ from src.analytics.court_detection.landmarks_overlay import run_landmarks
 
 VIDEO_PATH        = 'input_video/video_3.mp4'
 MODEL_PATH        = 'models/weights/last.pt'
-OUTPUT_PATH       = 'runs/bot-sort tracking/tracking_output.mp4'
-TRAJECTORIES_PATH = 'runs/bot-sort tracking/analytics/trajectories.json'
+OUTPUT_PATH       = 'output_video/tracking_output.mp4'
+TRAJECTORIES_PATH = 'output_video/trajectories.json'
 REID_PATH         = 'osnet_x0_25_msmt17.pt'
 DEVICE            = torch.device('cuda:0')
 

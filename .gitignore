@@ -1,0 +1,14 @@
+@"
+# Ignore AI Models and Weights ONLY
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pb
+*.weights
+
+# Ignore Python Caches
+__pycache__/
+.venv/
+venv/
+"@ | Out-File -FilePath .gitignore -Encoding utf8
